@@ -1,0 +1,82 @@
+using System;
+using System.Threading;
+using BepInEx;
+using BepInEx.Logging;
+using UnityEngine;
+
+namespace AliceInCradleLink
+{
+    /// <summary>
+    /// Alice in Cradle × DGStudio 联动模组（BepInEx 5）——纯数据发送端。
+    /// 每帧采样玩家 HP/MP/EP 与差分信号，按周期 POST /data 上报给 DGStudio
+    /// 「Alice in Cradle 联动」模块；同时轮询 GET /data 的回传字段画在
+    /// F9 面板上。强度换算与设备命令全部由 DGStudio 侧映射表完成。
+    ///
+    /// 本作会在场景切换时连带销毁 BepInEx 自带的管理器对象，插件自己的
+    /// Update/OnGUI 会随之失效，所以每帧逻辑挂在独立 GameObject 上，
+    /// 由 HTTP 线程通过 Unity 同步上下文定时把它重建回来。
+    /// </summary>
+    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    [BepInProcess("AliceInCradle.exe")]
+    public class Plugin : BaseUnityPlugin
+    {
+        public const string PluginGuid = "dev.dgstudio.alicein_cradle.link";
+        public const string PluginName = "AliceInCradleLink";
+        public const string PluginVersion = "0.2.0";
+
+        private static ManualLogSource Log;
+
+        private LinkConfig _cfg;
+        private DataClient _client;
+        private VitalSampler _sampler;
+        private OverlayUi _overlay;
+        private SynchronizationContext _syncCtx;
+        private Timer _watchdog;
+        private GameObject _runnerGo;
+        private LinkRunner _runner;
+        private int _respawns;
+
+        private void Awake()
+        {
+            Log = Logger;
+            _cfg = new LinkConfig(Config);
+            _client = new DataClient(_cfg, Log);
+            _sampler = new VitalSampler(_cfg, Log);
+            _overlay = new OverlayUi(_cfg, _client, _sampler);
+            _client.Start();
+
+            _syncCtx = SynchronizationContext.Current;
+            EnsureRunner();
+            _watchdog = new Timer(_ => _syncCtx?.Post(_ => EnsureRunner(), null),
+                                  null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+            // 注意：不能在 OnDestroy 里收尾——本作的场景切换会销毁 BepInEx 的管理器对象，
+            // 那远早于游戏退出，会把整条链路一起停掉。
+            Application.quitting += OnQuitting;
+
+            Log.LogInfo($"联动模组已加载：目标 {_cfg.BaseUrl.Value}，按 {_cfg.OverlayKey.Value} 切换状态面板" +
+                        $"（同步上下文 {(_syncCtx == null ? "缺失" : "可用")}）");
+        }
+
+        /// <summary>只能主线程调用：runner 被销毁时重新挂一个。</summary>
+        private void EnsureRunner()
+        {
+            if (_runner != null && _runnerGo != null) return;
+            if (_runnerGo != null) Destroy(_runnerGo);
+
+            _runnerGo = new GameObject("AliceInCradleLink");
+            DontDestroyOnLoad(_runnerGo);
+            _runner = _runnerGo.AddComponent<LinkRunner>();
+            _runner.Init(_cfg, _sampler, _client, _overlay, Log);
+
+            _respawns++;
+            if (_respawns <= 3)
+                Log.LogInfo($"每帧执行组件已挂载（第 {_respawns} 次）");
+        }
+
+        private void OnQuitting()
+        {
+            _watchdog?.Dispose();
+            _client?.Dispose();
+        }
+    }
+}

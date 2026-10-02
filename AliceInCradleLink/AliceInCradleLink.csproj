@@ -1,0 +1,89 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Alice in Cradle × DGStudio 联动模组（BepInEx 5 / Unity Mono）。
+       编译只需要两处外部路径：游戏目录（提供 UnityEngine 与游戏程序集）
+       和 BepInEx core 目录（提供 BepInEx.dll / 0Harmony.dll）。
+       可用环境变量或 msbuild 参数覆盖：
+         dotnet build -p:GameDir="D:\games\AliceInCradle" -p:BepInExCore="..." -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>AliceInCradleLink</AssemblyName>
+    <RootNamespace>AliceInCradleLink</RootNamespace>
+    <Version>0.2.0</Version>
+    <Product>Alice in Cradle × DGStudio Link</Product>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>CS0649;CS1591;CS0169</NoWarn>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <GameDir Condition="'$(GameDir)' == ''">D:\Download\AliceInCradle Win ver030\AliceInCradle_ver030</GameDir>
+    <ManagedDir>$(GameDir)\AliceInCradle_Data\Managed</ManagedDir>
+    <BepInExCore Condition="'$(BepInExCore)' == ''">$(MSBuildThisFileDirectory)..\_vendor\bepinex-core</BepInExCore>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCore)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System">
+      <HintPath>$(ManagedDir)\System.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(ManagedDir)\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(ManagedDir)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- 游戏自身类型：nel.* 在 Assembly-CSharp，m2d.*（M2Attackable/M2MoverPr）在 unsafeAssem -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- 游戏自带 Newtonsoft.Json，用它序列化/解析 JSON 载荷；
+         JsonUtility 在插件程序集里无法还原嵌套对象 -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(ManagedDir)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="unsafeAssem">
+      <HintPath>$(ManagedDir)\unsafeAssem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- dotnet build -t:Deploy 直接把 dll 复制到游戏的 BepInEx/plugins 下；
+       同时同步一份到模块携带目录（modules/alice_cradle/mods/），
+       供 DGStudio 模块页「一键安装游戏模组」释放 -->
+  <Target Name="Deploy" AfterTargets="Build" DependsOnTargets="Build">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(GameDir)\BepInEx\plugins\AliceInCradleLink"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(GameDir)\BepInEx')" />
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\modules\alice_cradle\mods"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
