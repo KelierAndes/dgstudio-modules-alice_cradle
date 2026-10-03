@@ -8,9 +8,10 @@ namespace AliceInCradleLink
 {
     /// <summary>
     /// Alice in Cradle × DGStudio 联动模组（BepInEx 5）——纯数据发送端。
-    /// 每帧采样玩家 HP/MP/EP 与差分信号，按周期 POST /data 上报给 DGStudio
-    /// 「Alice in Cradle 联动」模块；同时轮询 GET /data 的回传字段画在
-    /// F9 面板上。强度换算与设备命令全部由 DGStudio 侧映射表完成。
+    /// 每帧采样玩家 HP/MP/EP 与差分信号，数据变动时即时 POST /data 上报给
+    /// DGStudio「Alice in Cradle 联动」模块（无变动不通信）；同时轮询
+    /// GET /data 的回传字段画在 F9 面板上。强度换算与设备命令全部由
+    /// DGStudio 侧映射表完成。
     ///
     /// 本作会在场景切换时连带销毁 BepInEx 自带的管理器对象，插件自己的
     /// Update/OnGUI 会随之失效，所以每帧逻辑挂在独立 GameObject 上，
@@ -22,7 +23,7 @@ namespace AliceInCradleLink
     {
         public const string PluginGuid = "dev.dgstudio.alicein_cradle.link";
         public const string PluginName = "AliceInCradleLink";
-        public const string PluginVersion = "0.2.1";
+        public const string PluginVersion = "0.3.0";
 
         private static ManualLogSource Log;
 

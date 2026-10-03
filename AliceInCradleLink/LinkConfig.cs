@@ -10,7 +10,7 @@ namespace AliceInCradleLink
         // --- 通信 ---
         public ConfigEntry<bool> Enabled;
         public ConfigEntry<string> BaseUrl;
-        public ConfigEntry<float> ReportSeconds;
+        public ConfigEntry<float> ZeroDelaySeconds;
         public ConfigEntry<float> PollSeconds;
 
         // --- 信号口径 ---
@@ -29,8 +29,9 @@ namespace AliceInCradleLink
                 "关闭后模组不再读取游戏状态，也不再与 DGStudio 通信。");
             BaseUrl = config.Bind("0. 总开关", "DGStudio 地址", "http://127.0.0.1:8920",
                 "DGStudio「Alice in Cradle 联动」模块的数据服务地址，默认端口 8920。");
-            ReportSeconds = config.Bind("0. 总开关", "上报间隔 (秒)", 0.2f,
-                "游戏数值 POST /data 的周期。");
+            ZeroDelaySeconds = config.Bind("0. 总开关", "脉冲回零延迟 (秒)", 0.2f,
+                "差分信号（受伤/回血等）发出后，经过该时长补发一次 0 回到基线。" +
+                "上报由数据变动即时触发，不再按周期轮询。");
             PollSeconds = config.Bind("0. 总开关", "回传轮询间隔 (秒)", 0.5f,
                 "GET /data 拉取设备回传字段的间隔。");
 

@@ -1,7 +1,8 @@
 """Alice in Cradle 数据联动服务（纯新协议，替代 Game Hub 兼容层）。
 
-Unity MOD 作为纯数据发送端，把游戏内命名数值（HP、MP、Hurt 等，见插件
-``META["params"]`` 声明）周期上报：
+Unity MOD 作为纯数据发送端，按数据变动即时上报游戏内命名数值
+（HP、MP、Hurt 等，见插件 ``META["params"]`` 声明；无变动不通信，
+本服务只被动接收解析，不做按时间的刷新逻辑）：
 
 * ``POST /data``  body 为 JSON 对象 ``{"HP": 60, "MP": 30, ...}``，
   每个字段名进入共享 :class:`dglab.mapping.MappingEngine` 信号空间；
