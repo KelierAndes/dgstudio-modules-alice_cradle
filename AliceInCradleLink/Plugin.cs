@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
+using HarmonyLib;
 using UnityEngine;
 
 namespace AliceInCradleLink
@@ -23,7 +24,7 @@ namespace AliceInCradleLink
     {
         public const string PluginGuid = "dev.dgstudio.alicein_cradle.link";
         public const string PluginName = "AliceInCradleLink";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.4.0";
 
         private static ManualLogSource Log;
 
@@ -43,6 +44,12 @@ namespace AliceInCradleLink
             _cfg = new LinkConfig(Config);
             _client = new DataClient(_cfg, Log);
             _sampler = new VitalSampler(_cfg, Log);
+            var hooks = EventHooks.Install(new Harmony(PluginGuid), _sampler, Log);
+            _sampler.SetHooks(hooks);
+            Log.LogInfo("事件钩子就绪情况：受伤=" + (hooks.Hurt ? "√" : "×（差分回退）") +
+                        " 回血=" + (hooks.Heal ? "√" : "×（差分回退）") +
+                        " 耗蓝=" + (hooks.MpLost ? "√" : "×（差分回退）") +
+                        " 回蓝=" + (hooks.MpGain ? "√" : "×（差分回退）"));
             _overlay = new OverlayUi(_cfg, _client, _sampler);
             _client.Start();
 

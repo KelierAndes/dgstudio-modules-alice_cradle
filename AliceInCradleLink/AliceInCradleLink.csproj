@@ -12,7 +12,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>AliceInCradleLink</AssemblyName>
     <RootNamespace>AliceInCradleLink</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Product>Alice in Cradle × DGStudio Link</Product>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>CS0649;CS1591;CS0169</NoWarn>
@@ -26,6 +26,10 @@
   <ItemGroup>
     <Reference Include="BepInEx">
       <HintPath>$(BepInExCore)\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCore)\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System">
