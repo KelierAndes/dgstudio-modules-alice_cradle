@@ -6,10 +6,12 @@ using UnityEngine;
 namespace AliceInCradleLink
 {
     /// <summary>
-    /// 玩家状态采样：每帧反射读取 HP/MP/EP 与高潮计数，产生差分信号
-    /// （Hurt/Heal/MpLost/MpGain），并维护 Orgasming 保持窗。
+    /// 玩家状态采样：每帧反射读取 HP/MP/EP 与高潮计数，产生瞬时脉冲差分
+    /// 信号（Hurt/Heal/MpLost/MpGain），并维护 Orgasming 保持窗。
     /// 数值口径与 DGStudio「Alice in Cradle 联动」模块 META["params"] 一致，
     /// 模组本身不做任何强度换算——映射由 DGStudio 侧表达式完成。
+    /// 脉冲值经 DrainPulses 交给 DataClient 后只上报一次并自动回零，
+    /// 不作为持续数值驻留在上报载荷里。
     /// </summary>
     public sealed class VitalSampler
     {
@@ -92,7 +94,8 @@ namespace AliceInCradleLink
             if (diffOrgasm > 0)
             {
                 _orgasmEnds = DateTime.UtcNow.AddMilliseconds(Math.Max(0, _cfg.OrgasmHoldMs.Value));
-                Signal("Orgasm", OrgasmCount, "高潮");
+                // 累计计数走连续值字段每拍上报；这里只刷新面板事件指示
+                Note(OrgasmCount, "高潮");
             }
         }
 
@@ -106,7 +109,7 @@ namespace AliceInCradleLink
             lock (_gate) _pending.Clear();
         }
 
-        /// <summary>合并最新上报载荷：连续值 + 待发差分信号（取后清空）。</summary>
+        /// <summary>合并最新连续值载荷：HP/MP 等每拍常驻的数值字段。</summary>
         public void Collect(Dictionary<string, float> sink)
         {
             if (!Ready) return;
@@ -117,6 +120,11 @@ namespace AliceInCradleLink
             sink["EP"] = Ep;
             sink["Orgasm"] = OrgasmCount;
             sink["Orgasming"] = DateTime.UtcNow < _orgasmEnds ? 1f : 0f;
+        }
+
+        /// <summary>取走本帧产生的差分脉冲（取后清空），交给脉冲通道上报。</summary>
+        public void DrainPulses(Dictionary<string, float> sink)
+        {
             lock (_gate)
             {
                 foreach (var kv in _pending)
@@ -138,6 +146,13 @@ namespace AliceInCradleLink
         private void Signal(string name, float value, string label)
         {
             lock (_gate) _pending[name] = value;
+            SignalCount++;
+            LastSignal = label + " " + Mathf.RoundToInt(value);
+        }
+
+        /// <summary>只刷新面板事件指示：值本身已在连续值字段里每拍上报。</summary>
+        private void Note(float value, string label)
+        {
             SignalCount++;
             LastSignal = label + " " + Mathf.RoundToInt(value);
         }

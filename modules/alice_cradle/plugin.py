@@ -17,7 +17,7 @@ config/alice_cradle.json，联动页据此渲染 输出表 / 输入表 / 模块�
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "description": "游戏侧 MOD 仅上报 HP/MP 等命名数值，本模块按核心参数映射表"
                    "求值驱动设备，并把设备状态表达式回传游戏（HTTP + JSON）。",
     "settings_key": "alice_cradle",
@@ -33,10 +33,10 @@ META = {
         "MP": {"label": "当前魔力", "desc": "玩家当前 MP"},
         "MPmax": {"label": "魔力上限", "desc": "玩家 MP 上限"},
         "EP": {"label": "兴奋度", "desc": "累计兴奋度"},
-        "Hurt": {"label": "本次掉血", "desc": "最近一次伤害造成的 HP 减少量"},
-        "Heal": {"label": "本次回血", "desc": "最近一次回复的 HP 增加量"},
-        "MpLost": {"label": "本次耗蓝", "desc": "最近一次 MP 减少量"},
-        "MpGain": {"label": "本次回蓝", "desc": "最近一次 MP 增加量"},
+        "Hurt": {"label": "本期掉血", "desc": "伤害脉冲：一个上报周期内的 HP 减少量，上报一次后回零"},
+        "Heal": {"label": "本期回血", "desc": "回血脉冲：一个上报周期内的 HP 增加量，上报一次后回零"},
+        "MpLost": {"label": "本期耗蓝", "desc": "耗蓝脉冲：一个上报周期内的 MP 减少量，上报一次后回零"},
+        "MpGain": {"label": "本期回蓝", "desc": "回蓝脉冲：一个上报周期内的 MP 增加量，上报一次后回零"},
         "Orgasm": {"label": "高潮次数", "desc": "本局累计高潮次数"},
         "Orgasming": {"label": "高潮中", "desc": "高潮效果持续期间为 1"},
     },

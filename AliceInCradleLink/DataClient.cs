@@ -24,6 +24,11 @@ namespace AliceInCradleLink
     /// 纯数据发送端客户端：主线程只写最新数值载荷，后台线程按配置周期
     /// POST /data 上报游戏数值、GET /data 拉取回传字段。
     /// 强度换算与设备命令全部由 DGStudio 侧映射表完成，模组不做任何换算。
+    ///
+    /// 字段分两种口径：连续值（HP/MP 等）按最新值常驻载荷，每拍都发；
+    /// 脉冲值（Hurt/Heal 等差分信号）同名累加后只随一个上报周期发出，
+    /// 下一拍自动补发一次 0 让下游映射回到基线，不在快照中长期驻留——
+    /// 否则旧伤害值会被映射引擎当作持续存在的水平反复参与求值。
     /// </summary>
     public sealed class DataClient : IDisposable
     {
@@ -31,6 +36,8 @@ namespace AliceInCradleLink
         private readonly ManualLogSource _log;
         private readonly object _gate = new object();
         private readonly Dictionary<string, float> _payload = new Dictionary<string, float>();
+        private readonly Dictionary<string, float> _pulses = new Dictionary<string, float>();
+        private readonly HashSet<string> _zeroFollow = new HashSet<string>();
 
         private Thread _worker;
         private volatile bool _stopping;
@@ -63,6 +70,20 @@ namespace AliceInCradleLink
             {
                 foreach (var kv in values)
                     _payload[kv.Key] = kv.Value;
+            }
+        }
+
+        /// <summary>
+        /// 主线程调用：并入待发脉冲（同名累加，一个上报周期内的多次变化
+        /// 合并为一次总量）。脉冲只发一次，发送后的下一拍补发 0 回基线。
+        /// </summary>
+        public void UpdatePulses(Dictionary<string, float> pulses)
+        {
+            lock (_gate)
+            {
+                foreach (var kv in pulses)
+                    _pulses[kv.Key] = (_pulses.TryGetValue(kv.Key, out var cur)
+                                           ? cur : 0f) + kv.Value;
             }
         }
 
@@ -114,11 +135,27 @@ namespace AliceInCradleLink
 
         private void Report()
         {
+            List<string> zeroed = new List<string>();
             Dictionary<string, float> batch;
             lock (_gate)
             {
-                if (_payload.Count == 0) return;
+                if (_payload.Count == 0 && _pulses.Count == 0 &&
+                    _zeroFollow.Count == 0) return;
                 batch = new Dictionary<string, float>(_payload);
+                // 待发脉冲并入本拍并登记回零；发送成败都不重发脉冲本体
+                foreach (var kv in _pulses)
+                {
+                    batch[kv.Key] = kv.Value;
+                    _zeroFollow.Add(kv.Key);
+                }
+                _pulses.Clear();
+                // 上一拍脉冲的回零：本拍有同名新脉冲则顺延，否则补发一次 0
+                foreach (var name in _zeroFollow)
+                {
+                    if (batch.ContainsKey(name)) continue;
+                    batch[name] = 0f;
+                    zeroed.Add(name);
+                }
             }
             try
             {
@@ -127,10 +164,15 @@ namespace AliceInCradleLink
                     obj[kv.Key] = new JValue(kv.Value);
                 Request("POST", "/data", obj.ToString(Formatting.None));
                 MarkOnline(true);
+                lock (_gate)
+                {
+                    foreach (var name in zeroed)
+                        _zeroFollow.Remove(name);   // 发送成功才撤销回零登记
+                }
             }
             catch (Exception exc)
             {
-                Fail(exc);
+                Fail(exc);   // 回零登记保留，下一拍重试；失败的脉冲不补发
             }
         }
 

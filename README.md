@@ -7,7 +7,7 @@ BepInEx 5 发行包在 `modules/alice_cradle/vendor/`（自动安装 BepInEx 用
 
 模组（`AliceInCradleLink`，BepInEx 5 插件）读取 HP / MP / EP 等数值并上报；只做数据采集，不含强度换算——换算全部由模块的映射表完成：
 
-* `POST /data`：MOD 周期上报命名通道（`HP`、`MP`、`EP`、`Hurt`、`Heal`、`MpLost`、`MpGain`、`Orgasm`、`Orgasming` 等），可在「联动」页把它们映射到任意核心参数或头像参数（表达式 `{HP}/{HPmax}*200` 这类四则运算）；
+* `POST /data`：MOD 周期上报命名通道（`HP`、`MP`、`EP`、`Hurt`、`Heal`、`MpLost`、`MpGain`、`Orgasm`、`Orgasming` 等），可在「联动」页把它们映射到任意核心参数或头像参数（表达式 `{HP}/{HPmax}*200` 这类四则运算）。其中 `Hurt`/`Heal`/`MpLost`/`MpGain` 是**瞬时脉冲**：取值为一个上报周期内的变化总量，只随一次上报发出，下一拍自动回零，不会作为持续数值驻留在映射引擎里；
 * `GET /data`：返回输出映射表求值结果（设备状态回传游戏显示），字段名可自由改名；
 * 默认服务地址 `127.0.0.1:8920`，在联动页模块卡片内配置。
 

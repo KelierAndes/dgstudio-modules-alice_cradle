@@ -17,6 +17,7 @@ namespace AliceInCradleLink
         private OverlayUi _overlay;
         private ManualLogSource _log;
         private readonly Dictionary<string, float> _values = new Dictionary<string, float>();
+        private readonly Dictionary<string, float> _pulses = new Dictionary<string, float>();
         private bool _firstFrame = true;
 
         public void Init(LinkConfig cfg, VitalSampler sampler, DataClient client,
@@ -43,8 +44,11 @@ namespace AliceInCradleLink
                 if (!_cfg.Enabled.Value) return;
                 _sampler.Tick();
                 _values.Clear();
+                _pulses.Clear();
                 _sampler.Collect(_values);
+                _sampler.DrainPulses(_pulses);
                 if (_values.Count > 0) _client.UpdateValues(_values);
+                if (_pulses.Count > 0) _client.UpdatePulses(_pulses);
             }
             catch (Exception exc)
             {
