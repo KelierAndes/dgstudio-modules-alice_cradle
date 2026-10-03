@@ -17,7 +17,7 @@ config/alice_cradle.json，联动页据此渲染 输出表 / 输入表 / 模块�
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.6.3",
+    "version": "0.6.4",
     "description": "游戏侧 MOD 仅上报 HP/MP 等命名数值，本模块按核心参数映射表"
                    "求值驱动设备，并把设备状态表达式回传游戏（HTTP + JSON）。",
     "settings_key": "alice_cradle",
@@ -35,7 +35,7 @@ META = {
         "EP": {"label": "兴奋度", "desc": "累计兴奋度"},
         "Hurt": {"label": "本期掉血", "desc": "伤害事件实际造成的 HP 减少量（游戏事件钩子，含血量清零后的过量伤害）"},
         "Heal": {"label": "本期回血", "desc": "回血事件实际回复的 HP 增加量（游戏事件钩子，钳满时无虚增脉冲）"},
-        "MpLost": {"label": "本期耗蓝", "desc": "耗蓝事件实际消耗的 MP（游戏事件钩子）"},
+        "MpLost": {"label": "本期耗蓝", "desc": "耗蓝事件实际消耗的 MP（游戏事件钩子；魔力槽空时的施放按请求消耗量上报）"},
         "MpGain": {"label": "本期回蓝", "desc": "回蓝事件实际回复的 MP（游戏事件钩子）"},
         "Orgasm": {"label": "高潮次数", "desc": "本局累计高潮次数"},
         "Orgasming": {"label": "高潮中", "desc": "高潮效果持续期间为 1"},

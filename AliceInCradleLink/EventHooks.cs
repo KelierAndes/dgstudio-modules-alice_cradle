@@ -53,7 +53,7 @@ namespace AliceInCradleLink
             status.Hurt = PatchOverloads(harmony, typeof(m2d.M2Attackable),
                 "applyHpDamage", null, null, Hm(nameof(HpPost))) > 0;
             status.MpLost = PatchOverloads(harmony, typeof(nel.PR),
-                "applyMpDamage", new[] { 8 }, null, Hm(nameof(MpPost))) > 0;
+                "applyMpDamage", new[] { 8 }, Hm(nameof(MpPre)), Hm(nameof(MpPost))) > 0;
             status.Heal = PatchOverloads(harmony, typeof(nel.PR),
                 "cureHp", new[] { 3 }, Hm(nameof(CureHpPre)), Hm(nameof(CureHpPost))) > 0;
             status.MpGain = PatchOverloads(harmony, typeof(nel.PR),
@@ -120,11 +120,23 @@ namespace AliceInCradleLink
                 _sampler.OnEventHurt(__result);
         }
 
-        // --- applyMpDamage：__result = 实际消耗的 MP ---
-        private static void MpPost(nel.PR __instance, int __result)
+        // --- applyMpDamage：游戏把消耗钳到当前 MP（min(val, mp)），槽空时
+        //     返回 0——前缀记下请求消耗量与槽值，后缀在「结果为 0 且槽空」
+        //     时按请求量上报（对应游戏仍显示的消耗数字）。若上游判定无效
+        //     （无敌帧等，返回 0 且未触碰 MP）恰逢槽空，会误报一次，属可
+        //     接受的窄角。 ---
+        private static void MpPre(nel.PR __instance, int val, ref int[] __state)
         {
-            if (__result > 0 && __instance is nel.PRNoel)
+            __state = new[] { val, (int)_mpField.GetValue(__instance) };
+        }
+
+        private static void MpPost(nel.PR __instance, int __result, int[] __state)
+        {
+            if (!(__instance is nel.PRNoel)) return;
+            if (__result > 0)
                 _sampler.OnEventMpLost(__result);
+            else if (__state[0] > 0 && __state[1] <= 0)
+                _sampler.OnEventMpLost(__state[0]);
         }
 
         // --- cureHp/cureMp：前缀记旧值，后缀取实际变化量 ---

@@ -21,15 +21,14 @@ namespace AliceInCradleLink
     }
 
     /// <summary>
-    /// 纯数据发送端客户端（事件触发上报）：主线程写入最新数值，任何变动
-    /// 立即唤醒后台线程 POST /data；无变动不通信，不做周期性上报。
+    /// 纯数据发送端客户端（事件触发 + 脉冲合并窗口）：连续值变动即时上报；
+    /// 脉冲值（Hurt/Heal 等事件量）按「每单次伤害脉冲时间」合并——
+    /// 首个事件立即开口输出并开启窗口，窗口内（距上次输出小于脉冲时间）
+    /// 的新事件只并入同一脉冲、顺延归零期限、不产生新输出；窗口到期时
+    /// 一次性输出合并累计总量，随后归零。窗口内的输出严格递增、窗口之间
+    /// 以 0 隔开，因此不会被映射引擎的同值去重吞掉。
     ///
-    /// 脉冲字段（Hurt/Heal 等差分信号）同名累加后只随一次 POST 发出，并在
-    /// 回零延迟后补发一次 0 让下游映射回到基线；若回零前又来了同值脉冲，
-    /// 先补 0 再发脉冲——映射引擎对同值信号去重，不隔值会被吞掉。
-    /// 连续值只发相对上次成功发送的变动字段；首次连上与断线恢复后全量
-    /// 重报，保证模块重启后映射引擎能重新拿到静态值。
-    /// POST 失败时脉冲与变动保留重试（不丢数据），并做固定退避。
+    /// 首次连上与断线恢复后全量重报连续值；POST 失败保留待发内容退避重试。
     /// GET /data 仍按 PollSeconds 轮询：那是回传字段的拉取通道，用于面板显示。
     /// </summary>
     public sealed class DataClient : IDisposable
@@ -40,6 +39,7 @@ namespace AliceInCradleLink
 
         private readonly Dictionary<string, float> _payload = new Dictionary<string, float>();
         private readonly Dictionary<string, float> _pulses = new Dictionary<string, float>();
+        private readonly Dictionary<string, DateTime> _windowUntil = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, DateTime> _zeroDue = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, float> _lastSent = new Dictionary<string, float>();
 
@@ -90,18 +90,32 @@ namespace AliceInCradleLink
         }
 
         /// <summary>
-        /// 主线程调用：并入待发脉冲（同名累加）并立即触发上报。一个唤醒
-        /// 周期内的多次变化合并为一次总量；逐帧到达的事件各自成拍送达。
+        /// 主线程调用：并入待发脉冲（同名累加）。距上次输出小于脉冲时间时
+        /// 并入当前窗口（顺延归零期限，不产生新输出）；否则作为新脉冲开口，
+        /// 由后台线程立即输出。
         /// </summary>
         public void UpdatePulses(Dictionary<string, float> pulses)
         {
             lock (_gate)
             {
+                var now = DateTime.UtcNow;
+                var window = PulseWindow();
                 foreach (var kv in pulses)
+                {
                     _pulses[kv.Key] = (_pulses.TryGetValue(kv.Key, out var cur)
                                            ? cur : 0f) + kv.Value;
+                    if (_windowUntil.TryGetValue(kv.Key, out var until) && until > now)
+                        _windowUntil[kv.Key] = now + window;   // 窗口内：合并
+                    else
+                        _windowUntil.Remove(kv.Key);           // 无窗口/已过期：重新开口
+                }
                 Monitor.PulseAll(_gate);
             }
+        }
+
+        private TimeSpan PulseWindow()
+        {
+            return TimeSpan.FromSeconds(Mathf.Clamp(_cfg.PulseSeconds.Value, 0.05f, 10f));
         }
 
         public void Start()
@@ -151,118 +165,186 @@ namespace AliceInCradleLink
             }
         }
 
-        /// <summary>距下一个待处理事件（待发内容 / 回零 / 退避 / 轮询）的等待时长。</summary>
+        /// <summary>距下一个待处理事件的等待时长（开口 / 收口 / 回零 / 退避 / 轮询）。</summary>
         private TimeSpan WaitSpan(DateTime now)
         {
             if (_retryAfter > now) return _retryAfter - now;
-            if (_dirty || _pulses.Count > 0 || (_announce && _payload.Count > 0))
+            if (_dirty || HasOpenable() || (_announce && _payload.Count > 0))
                 return TimeSpan.Zero;
-            foreach (var due in _zeroDue.Values)
-                if (due <= now) return TimeSpan.Zero;
+            foreach (var kv in _windowUntil)
+                if (kv.Value <= now) return TimeSpan.Zero;   // 窗口到期待收口
+            foreach (var kv in _zeroDue)
+                if (kv.Value <= now) return TimeSpan.Zero;   // 回零待发
             var wait = _nextPoll - now;
-            foreach (var due in _zeroDue.Values)
+            foreach (var kv in _windowUntil)
             {
-                var z = due - now;
+                var z = kv.Value - now;
+                if (z < wait) wait = z;
+            }
+            foreach (var kv in _zeroDue)
+            {
+                var z = kv.Value - now;
                 if (z < wait) wait = z;
             }
             return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
         }
 
+        private bool HasOpenable()
+        {
+            foreach (var kv in _pulses)
+                if (!_windowUntil.ContainsKey(kv.Key)) return true;
+            return false;
+        }
+
         private void Report()
         {
-            // 同值防吞：与上次成功发出的值相同的脉冲，必须先补发一个 0 隔开，
-            // 否则映射引擎的同值去重会把这次事件整个丢掉
-            List<string> swallowed = new List<string>();
+            var now = DateTime.UtcNow;
+            var cont = TakeContSnapshot(out var announce);
+
+            // —— 阶段 Z：到期回零（先于新脉冲，隔离同名同值防吞） ——
+            List<string> zeros = new List<string>();
             lock (_gate)
+                foreach (var kv in _zeroDue)
+                    if (kv.Value <= now) zeros.Add(kv.Key);
+            if (zeros.Count > 0)
             {
-                foreach (var kv in _pulses)
-                    if (_lastSent.TryGetValue(kv.Key, out var sent) && sent == kv.Value)
-                        swallowed.Add(kv.Key);
-            }
-            if (swallowed.Count > 0)
-            {
-                var zeros = new JObject();
-                foreach (var name in swallowed)
-                    zeros[name] = new JValue(0f);
-                if (!Post(zeros)) return;
+                var batch = new Dictionary<string, float>();
+                foreach (var n in zeros) batch[n] = 0f;
+                var attached = AttachCont(batch, cont);
+                if (!Post(ToJObject(batch))) return;
                 lock (_gate)
                 {
-                    foreach (var name in swallowed)
+                    foreach (var n in zeros)
                     {
-                        _lastSent[name] = 0f;
-                        _zeroDue.Remove(name);   // 回零义务已提前履行
+                        _zeroDue.Remove(n);
+                        _lastSent[n] = 0f;
                     }
+                    if (attached) { CommitCont(cont, announce); cont.Clear(); }
                 }
             }
 
-            Dictionary<string, float> batch;
-            Dictionary<string, float> sentPulses;
-            List<string> zeroed;
-            bool announce;
+            // —— 阶段 O：新脉冲开口输出并开启合并窗口 ——
+            Dictionary<string, float> openSnap;
             lock (_gate)
             {
-                var now = DateTime.UtcNow;
+                openSnap = new Dictionary<string, float>();
+                foreach (var kv in _pulses)
+                    if (!_windowUntil.ContainsKey(kv.Key))
+                        openSnap[kv.Key] = kv.Value;
+            }
+            if (openSnap.Count > 0)
+            {
+                var batch = new Dictionary<string, float>(openSnap);
+                var attached = AttachCont(batch, cont);
+                if (!Post(ToJObject(batch))) return;
+                lock (_gate)
+                {
+                    var window = PulseWindow();
+                    foreach (var kv in openSnap)
+                    {
+                        Deduct(kv.Key, kv.Value);
+                        _windowUntil[kv.Key] = DateTime.UtcNow + window;
+                        _lastSent[kv.Key] = kv.Value;
+                    }
+                    if (attached) { CommitCont(cont, announce); cont.Clear(); }
+                }
+            }
+
+            // —— 阶段 C：窗口到期收口（有新事件输出合并累计，随后登记回零） ——
+            Dictionary<string, float> closeSnap;
+            Dictionary<string, float> closeDelta;
+            lock (_gate)
+            {
+                closeSnap = new Dictionary<string, float>();
+                closeDelta = new Dictionary<string, float>();
+                foreach (var kv in _windowUntil)
+                {
+                    if (kv.Value > now) continue;
+                    var delta = _pulses.TryGetValue(kv.Key, out var d) ? d : 0f;
+                    var last = _lastSent.TryGetValue(kv.Key, out var l) ? l : 0f;
+                    closeSnap[kv.Key] = delta > 0f ? last + delta : 0f;
+                    closeDelta[kv.Key] = delta;
+                }
+            }
+            if (closeSnap.Count > 0)
+            {
+                var batch = new Dictionary<string, float>(closeSnap);
+                var attached = AttachCont(batch, cont);
+                if (!Post(ToJObject(batch))) return;
+                lock (_gate)
+                {
+                    foreach (var kv in closeSnap)
+                    {
+                        _windowUntil.Remove(kv.Key);
+                        _lastSent[kv.Key] = kv.Value;
+                        if (closeDelta[kv.Key] > 0f)
+                        {
+                            Deduct(kv.Key, closeDelta[kv.Key]);
+                            _zeroDue[kv.Key] = DateTime.UtcNow;   // 下一拍回零
+                        }
+                    }
+                    if (attached) { CommitCont(cont, announce); cont.Clear(); }
+                }
+            }
+
+            // —— 阶段 D：仅连续值 ——
+            if (cont.Count > 0)
+            {
+                if (Post(ToJObject(cont)))
+                {
+                    lock (_gate) CommitCont(cont, announce);
+                }
+                // 失败：_lastSent 未确认，下拍自动重发
+            }
+        }
+
+        /// <summary>连续值待发快照（announce 时全量）。</summary>
+        private Dictionary<string, float> TakeContSnapshot(out bool announce)
+        {
+            lock (_gate)
+            {
                 announce = _announce;
-                batch = new Dictionary<string, float>();
+                var cont = new Dictionary<string, float>();
                 if (announce)
                 {
-                    foreach (var kv in _payload) batch[kv.Key] = kv.Value;
+                    foreach (var kv in _payload) cont[kv.Key] = kv.Value;
                 }
                 else
                 {
-                    // 连续值只发变动字段（相对上次成功发出的值）
                     foreach (var kv in _payload)
                         if (!_lastSent.TryGetValue(kv.Key, out var sent) || sent != kv.Value)
-                            batch[kv.Key] = kv.Value;
+                            cont[kv.Key] = kv.Value;
                 }
-                foreach (var kv in _pulses)
-                    batch[kv.Key] = kv.Value;
-                zeroed = new List<string>();
-                foreach (var kv in _zeroDue)
-                    if (kv.Value <= now && !batch.ContainsKey(kv.Key))
-                    {
-                        batch[kv.Key] = 0f;
-                        zeroed.Add(kv.Key);
-                    }
-                if (batch.Count == 0)
-                {
-                    if (!announce) _dirty = false;
-                    // 全量重报但载荷为空（游戏尚未采样）：保持 announce 等首帧
-                    return;
-                }
-                sentPulses = new Dictionary<string, float>(_pulses);
-                _pulses.Clear();
-                _announce = false;
-                _dirty = false;
+                return cont;
             }
-            if (Post(ToJObject(batch)))
-            {
-                lock (_gate)
-                {
-                    var now = DateTime.UtcNow;
-                    var delay = TimeSpan.FromSeconds(
-                        Mathf.Clamp(_cfg.ZeroDelaySeconds.Value, 0.05f, 10f));
-                    foreach (var kv in batch)
-                        _lastSent[kv.Key] = kv.Value;
-                    foreach (var name in zeroed)
-                        _zeroDue.Remove(name);
-                    // 脉冲发出后重新登记回零；同名新脉冲会顺延（去抖）
-                    foreach (var kv in sentPulses)
-                        _zeroDue[kv.Key] = now + delay;
-                }
-            }
-            else
-            {
-                // 失败：脉冲放回、变动保留（_lastSent 未确认，自动重发）
-                lock (_gate)
-                {
-                    foreach (var kv in sentPulses)
-                        _pulses[kv.Key] = (_pulses.TryGetValue(kv.Key, out var cur)
-                                               ? cur : 0f) + kv.Value;
-                    _announce |= announce;
-                    _dirty = true;
-                }
-            }
+        }
+
+        /// <summary>把连续值搭进第一个批次；搭上了返回 true（发送成功后需 CommitCont）。</summary>
+        private static bool AttachCont(Dictionary<string, float> batch,
+                                       Dictionary<string, float> cont)
+        {
+            if (cont.Count == 0) return false;
+            foreach (var kv in cont)
+                batch[kv.Key] = kv.Value;
+            return true;
+        }
+
+        /// <summary>连续值批次发送成功后确认基线（含 announce 撤销）。调用方须持锁。</summary>
+        private void CommitCont(Dictionary<string, float> cont, bool announce)
+        {
+            foreach (var kv in cont)
+                _lastSent[kv.Key] = kv.Value;
+            _dirty = false;
+            if (announce) _announce = false;
+        }
+
+        private void Deduct(string name, float amount)
+        {
+            // 仅在持锁时调用
+            if (!_pulses.TryGetValue(name, out var cur)) return;
+            cur -= amount;
+            if (cur > 0f) _pulses[name] = cur;
+            else _pulses.Remove(name);
         }
 
         private static JObject ToJObject(Dictionary<string, float> batch)

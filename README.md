@@ -7,7 +7,7 @@ BepInEx 5 发行包在 `modules/alice_cradle/vendor/`（自动安装 BepInEx 用
 
 模组（`AliceInCradleLink`，BepInEx 5 插件）读取 HP / MP / EP 等数值并上报；只做数据采集，不含强度换算——换算全部由模块的映射表完成：
 
-* `POST /data`：MOD **按数据变动即时上报**命名通道（`HP`、`MP`、`EP`、`Hurt`、`Heal`、`MpLost`、`MpGain`、`Orgasm`、`Orgasming` 等，无变动不通信），可在「联动」页把它们映射到任意核心参数或头像参数（表达式 `{HP}/{HPmax}*200` 这类四则运算）。其中 `Hurt`/`Heal`/`MpLost`/`MpGain` 来自**游戏调用事件钩子**（Harmony，监听 `applyHpDamage`/`applyMpDamage`/`cureHp`/`cureMp`）：每次事件取真实数值逐事件送达，含血量清零后 overkill 分支的过量伤害（字段差分对此失明）；发送一次后自动补 0 回零，连续相同事件之间也会先补 0，避免被映射引擎的同值去重吞掉；游戏版本不兼容导致钩子安装失败时，对应通道自动回退为逐帧差分；
+* `POST /data`：MOD **按数据变动即时上报**命名通道（`HP`、`MP`、`EP`、`Hurt`、`Heal`、`MpLost`、`MpGain`、`Orgasm`、`Orgasming` 等，无变动不通信），可在「联动」页把它们映射到任意核心参数或头像参数（表达式 `{HP}/{HPmax}*200` 这类四则运算）。其中 `Hurt`/`Heal`/`MpLost`/`MpGain` 来自**游戏调用事件钩子**（Harmony，监听 `applyHpDamage`/`applyMpDamage`/`cureHp`/`cureMp`），按**脉冲合并窗口**上报（时长可在模组配置「每单次伤害脉冲时间」调整）：首个事件立即开口输出并开启窗口；窗口内的新事件并入同一脉冲（不拆分输出）；窗口结束时一次性输出合并累计总量并归零——窗口内输出严格递增、窗口之间以 0 隔开，不会被映射引擎的同值去重吞掉。血量清零后的 overkill 过量伤害、魔力槽空时的施放消耗均按游戏显示数值上报；游戏版本不兼容导致钩子安装失败时，对应通道自动回退为逐帧差分；
 * `GET /data`：返回输出映射表求值结果（设备状态回传游戏显示），字段名可自由改名；
 * 默认服务地址 `127.0.0.1:8920`，在联动页模块卡片内配置。
 

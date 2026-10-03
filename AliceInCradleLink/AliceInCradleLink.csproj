@@ -12,7 +12,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>AliceInCradleLink</AssemblyName>
     <RootNamespace>AliceInCradleLink</RootNamespace>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Product>Alice in Cradle × DGStudio Link</Product>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>CS0649;CS1591;CS0169</NoWarn>
