@@ -17,7 +17,7 @@ config/alice_cradle.json，联动页据此渲染 输出表 / 输入表 / 模块�
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.6.4",
+    "version": "0.6.5",
     "description": "游戏侧 MOD 仅上报 HP/MP 等命名数值，本模块按核心参数映射表"
                    "求值驱动设备，并把设备状态表达式回传游戏（HTTP + JSON）。",
     "settings_key": "alice_cradle",

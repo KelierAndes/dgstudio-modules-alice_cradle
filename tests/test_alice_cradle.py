@@ -61,11 +61,11 @@ class FakeCtx:
     async def set_wave(self, channel, name, slot_id=None):
         self.calls.append(("wave", channel, name))
 
-    async def fire_start(self, slot_id=None):
-        self.calls.append(("fire", "start"))
+    async def fire_start(self, slot_id=None, channel=None):
+        self.calls.append(("fire", "start", channel))
 
-    async def fire_stop(self, slot_id=None):
-        self.calls.append(("fire", "stop"))
+    async def fire_stop(self, slot_id=None, channel=None):
+        self.calls.append(("fire", "stop", channel))
 
     async def emergency_stop(self):
         self.calls.append(("emergency",))
@@ -165,11 +165,17 @@ class ExpressionTests(unittest.IsolatedAsyncioTestCase):
         ctx = FakeCtx()
         srv = GameDataServer(ctx, {"mappings": [
             {"param": "in_fire", "expr": "{danger}"},
+            {"param": "in_fire_a", "expr": "{danger}"},
             {"param": "in_emergency", "expr": "{dead}"}]})
         srv.apply_config()
         srv.engine.signal("danger", 1)
         await asyncio.sleep(0.02)
-        self.assertIn(("fire", "start"), ctx.calls)
+        self.assertIn(("fire", "start", None), ctx.calls)
+        self.assertIn(("fire", "start", "A"), ctx.calls)
+        srv.engine.signal("danger", 0)
+        await asyncio.sleep(0.02)
+        self.assertIn(("fire", "stop", None), ctx.calls)
+        self.assertIn(("fire", "stop", "A"), ctx.calls)
         srv.engine.signal("dead", 1)
         await asyncio.sleep(0.02)
         self.assertIn(("emergency",), ctx.calls)
