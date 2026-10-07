@@ -3,21 +3,16 @@ using UnityEngine;
 
 namespace AliceInCradleLink
 {
-    /// <summary>BepInEx 配置项集中声明（写入 BepInEx/config/dev.dgstudio.aliceinradle.link.cfg）。
-    /// 纯数据发送端：只保留通信、信号口径与状态面板配置，强度换算全部交给 DGStudio 映射表。</summary>
     public sealed class LinkConfig
     {
-        // --- 通信 ---
         public ConfigEntry<bool> Enabled;
         public ConfigEntry<string> BaseUrl;
         public ConfigEntry<float> PulseSeconds;
         public ConfigEntry<float> PollSeconds;
 
-        // --- 信号口径 ---
         public ConfigEntry<int> MaxChange;
         public ConfigEntry<int> OrgasmHoldMs;
 
-        // --- 状态面板 ---
         public ConfigEntry<KeyCode> OverlayKey;
         public ConfigEntry<bool> OverlayVisible;
         public ConfigEntry<float> OverlayX;

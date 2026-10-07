@@ -5,7 +5,6 @@ using UnityEngine;
 
 namespace AliceInCradleLink
 {
-    /// <summary>F9 状态面板：显示 DGStudio 回传字段与本地游戏数值。</summary>
     public sealed class OverlayUi
     {
         private const float Width = 380f;
@@ -39,7 +38,6 @@ namespace AliceInCradleLink
             _pixel.SetPixel(0, 0, Color.white);
             _pixel.Apply();
 
-            // 游戏的默认 GUI 皮肤可能没有中文字形，优先取系统字体
             var font = Font.CreateDynamicFontFromOSFont(
                 new[] { "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "Noto Sans CJK SC" }, 14);
             if (font != null) font.hideFlags = HideFlags.HideAndDontSave;

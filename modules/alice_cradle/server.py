@@ -1,19 +1,3 @@
-"""Alice in Cradle 数据联动服务（纯新协议，替代 Game Hub 兼容层）。
-
-Unity MOD 作为纯数据发送端，按数据变动即时上报游戏内命名数值
-（HP、MP、Hurt 等，见插件 ``META["params"]`` 声明；无变动不通信，
-本服务只被动接收解析，不做按时间的刷新逻辑）：
-
-* ``POST /data``  body 为 JSON 对象 ``{"HP": 60, "MP": 30, ...}``，
-  每个字段名进入共享 :class:`dglab.mapping.MappingEngine` 信号空间；
-* 模块配置 ``mappings``（行 ``{param: 核心输入参数 id, expr: 表达式}``）把
-  模块参数与核心输出参数经四则运算组合后驱动设备，表达式留空即同名直传；
-* ``GET /data``   返回 ``outputs``（行 ``{param, name, expr, type}``）求值后的
-  ``{模块侧参数名: 值}``；未配置输出行时回退为核心输出参数原样值；
-* ``GET /status`` 返回模块与引擎摘要，便于调试。
-
-协议与 DG-Lab Game Hub 完全无关；游戏侧仅需 HTTP + JSON。
-"""
 
 from __future__ import annotations
 
@@ -31,10 +15,9 @@ MAX_BODY = 64 * 1024
 DEFAULTS = {
     "host": "127.0.0.1",
     "port": 8920,
-    "rate": 2.0,          # 设备状态 → 引擎变量重算节流（秒）
-    "mappings": [],       # [{"param": 核心输入参数 id, "expr": 表达式}]
-    "outputs": [],        # [{"param": 核心输出参数 id, "name": 游戏侧名,
-                          #   "expr": 表达式, "type": "Int"}]
+    "rate": 2.0,
+    "mappings": [],
+    "outputs": [],
 }
 
 
@@ -47,7 +30,6 @@ def _num(value, default):
 
 
 class GameDataServer:
-    """asyncio HTTP/1.1 JSON 服务 + 共享映射引擎。"""
 
     def __init__(self, ctx, config: dict | None = None):
         self.ctx = ctx
@@ -68,7 +50,6 @@ class GameDataServer:
         self._primed = False
 
     class _DeviceApi:
-        """把宿主 ModuleContext 适配成核心参数派发器需要的接口。"""
 
         def __init__(self, srv: "GameDataServer"):
             self._srv = srv
@@ -108,9 +89,7 @@ class GameDataServer:
         def run(self, coro) -> None:
             self._srv._spawn(coro)
 
-    # ---- 配置便捷属性 --------------------------------------------------
 
-    # ---- 生命周期 -----------------------------------------------------
     async def start(self) -> None:
         self.apply_config()
         self._server = await asyncio.start_server(
@@ -122,7 +101,6 @@ class GameDataServer:
                      f":{self.config['port']}")
 
     def apply_config(self) -> None:
-        """把 mappings / outputs 装载进引擎（首轮静默，不写设备）。"""
         first = not self._primed
         if first:
             self.engine.armed = False
@@ -157,7 +135,6 @@ class GameDataServer:
         return self._running
 
     async def _pump_loop(self) -> None:
-        """设备状态变量随时间变化：定期重算表达式。"""
         interval = max(0.05, _num(self.config.get("rate"), 2.0) / 10.0)
         try:
             while self._running:
@@ -169,15 +146,13 @@ class GameDataServer:
     def _spawn(self, coro) -> None:
         try:
             task = asyncio.ensure_future(coro)
-        except RuntimeError:      # 无运行中的事件循环（测试/停机）
+        except RuntimeError:
             coro.close()
             return
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    # ---- 值空间 / 派发 -------------------------------------------------
     def device_vars(self) -> dict[str, float]:
-        """核心输出参数实时值（``家族.信号``）+ 全家族短名别名。"""
         try:
             state = self.ctx.get_state()
         except Exception:
@@ -195,14 +170,11 @@ class GameDataServer:
         except Exception as exc:
             self.ctx.log(f"Alice 表达式派发 {target}={value} 失败: {exc!r}")
 
-    # ---- 输出（核心 → 游戏） -------------------------------------------
     def output_values(self) -> dict[str, Any]:
-        """按输出映射表求值；未配置输出行时回退为核心输出参数原样值。"""
         if self.engine.outputs:
             return dict(self.engine.out_values)
         return {key: _round_num(value) for key, value in self.device_vars().items()}
 
-    # ---- HTTP ---------------------------------------------------------
     async def _handle(self, reader, writer) -> None:
         try:
             request_line = await asyncio.wait_for(reader.readline(), 10)

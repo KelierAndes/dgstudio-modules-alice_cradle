@@ -5,10 +5,6 @@ using UnityEngine;
 
 namespace AliceInCradleLink
 {
-    /// <summary>
-    /// 真正承载每帧逻辑的组件。本作的场景切换会连带销毁 BepInEx 自带的管理器对象，
-    /// 因此逻辑挂在自己的 GameObject 上，由后台线程通过 Unity 同步上下文定时重建。
-    /// </summary>
     public class LinkRunner : MonoBehaviour
     {
         private LinkConfig _cfg;
@@ -64,7 +60,7 @@ namespace AliceInCradleLink
             }
             catch (Exception exc)
             {
-                enabled = false;   // OnGUI 每帧触发，关掉组件防止刷屏
+                enabled = false;
                 _log.LogError($"面板绘制异常: {exc.GetType().Name}: {exc.Message}");
             }
         }

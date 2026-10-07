@@ -1,18 +1,3 @@
-"""Alice in Cradle 联动模块：游戏数据接收 + 核心参数映射（纯新协议）。
-
-Unity MOD 只作为数据发送端，把游戏内命名数值（HP、MP、Hurt 等，本模块
-``META["params"]`` 声明的参数集）经 ``POST /data`` 上报。映射表以核心定义的
-参数为锚点：
-
-* ``mappings`` 行 ``{param: 核心输入参数, expr: 表达式}``（如
-  ``郊狼通道 A 强度 ← {HP}/{HPmax}*200``）驱动设备；
-* ``outputs`` 行 ``{param: 核心输出参数, name: 游戏侧字段名, expr: 表达式}``
-  决定 ``GET /data`` 回传给游戏显示的内容，字段名可由用户重命名。
-
-核心参数名固定不可改；表达式可自由混合本模块参数与核心输出参数，
-结果取整钳制。META["config"] 声明全部配置项，宿主自动装载
-config/alice_cradle.json，联动页据此渲染 输出表 / 输入表 / 模块设置。
-"""
 
 META = {
     "id": "alice_cradle",
@@ -22,11 +7,8 @@ META = {
                    "求值驱动设备，并把设备状态表达式回传游戏（HTTP + JSON）。",
     "settings_key": "alice_cradle",
     "actions": [],
-    # 携带的游戏端模组：mods/ 内的已编译文件一键释放到游戏目录
-    # （dest 相对游戏根目录；marker 为游戏主程序，用于自动扫描定位）
     "mods": {"dest": "BepInEx/plugins/AliceInCradleLink",
              "marker": "AliceInCradle.exe"},
-    # 模块自定义参数：MOD 上报的命名数值，可在输入表达式中以 {名称} 引用
     "params": {
         "HP": {"label": "当前生命", "desc": "玩家当前 HP"},
         "HPmax": {"label": "生命上限", "desc": "玩家 HP 上限"},
@@ -40,7 +22,6 @@ META = {
         "Orgasm": {"label": "高潮次数", "desc": "本局累计高潮次数"},
         "Orgasming": {"label": "高潮中", "desc": "高潮效果持续期间为 1"},
     },
-    # 可读参数：核心输出信号 → GET /data 回传给游戏的默认字段（可重命名）
     "reads": {
         "StrengthA": {"label": "设备通道 A 强度", "name": "StrengthA"},
         "StrengthB": {"label": "设备通道 B 强度", "name": "StrengthB"},
@@ -100,12 +81,10 @@ class AliceCradleModule(ModuleBase):
         return META["config"]
 
     def link_params(self) -> list[tuple[str, str]]:
-        """模块可写参数表（MOD 上报的命名数值，输入表达式变量池）。"""
         return [(name, str(item.get("label") or name))
                 for name, item in META["params"].items()]
 
     def read_params(self) -> list[tuple[str, str]]:
-        """模块可读参数表（GET /data 回传字段的默认信号集）。"""
         return [(signal, str(item.get("label") or signal))
                 for signal, item in META["reads"].items()]
 
@@ -136,7 +115,6 @@ class AliceCradleModule(ModuleBase):
             raise
 
     async def reload_config(self) -> None:
-        """设置变更后把两张映射表与节流重新装载进运行中的服务。"""
         if self.server is None:
             return
         for key in ("rate", "mappings", "outputs"):
@@ -154,7 +132,6 @@ class AliceCradleModule(ModuleBase):
 
 
 def migrate_legacy(settings: dict) -> bool:
-    """旧版 ``output_map``（信号键 → 字段名）迁到 ``outputs`` 行表。"""
     old = settings.get("output_map")
     if not isinstance(old, dict) or not old:
         return False
@@ -178,7 +155,6 @@ def migrate_legacy(settings: dict) -> bool:
 
 
 def drop_legacy_family(settings: dict) -> bool:
-    """清理已移除的「核心输出取值家族」配置项（别名现按全家族解析）。"""
     if "family" not in settings:
         return False
     settings.pop("family", None)
@@ -188,8 +164,6 @@ def drop_legacy_family(settings: dict) -> bool:
 
 
 def materialize_reads(settings: dict) -> bool:
-    """空输出表按 META["reads"] 落地默认可读字段行（信号跨家族解析，
-    郊狼 → 负鼠 → 灵猫取第一个有该信号的家族，接入任意设备均可联动）。"""
     if any(isinstance(row, dict) and str(row.get("name") or "").strip()
            for row in (settings.get("outputs") or [])):
         return False

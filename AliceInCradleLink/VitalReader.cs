@@ -4,10 +4,6 @@ using UnityEngine;
 
 namespace AliceInCradleLink
 {
-    /// <summary>
-    /// 玩家生命/魔力/兴奋度字段的反射读取器：这些字段声明在 m2d.M2Attackable
-    /// 及其派生类上且为 protected，跨程序集无法直接访问，逐层查找后缓存。
-    /// </summary>
     internal sealed class VitalReader
     {
         private readonly FieldInfo _hp;

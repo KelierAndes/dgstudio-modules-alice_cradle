@@ -5,16 +5,6 @@ using UnityEngine;
 
 namespace AliceInCradleLink
 {
-    /// <summary>
-    /// 玩家状态采样：HP/MP/EP 与高潮计数逐帧反射读取（连续值）；差分脉冲
-    /// （Hurt/Heal/MpLost/MpGain）优先来自 EventHooks 的游戏调用钩子——
-    /// 每次事件取真实数值，能覆盖血量清零后 overkill 分支这类字段差分
-    /// 看不见的场景；钩子安装失败的通道回退为逐帧差分。
-    /// 数值口径与 DGStudio「Alice in Cradle 联动」模块 META["params"] 一致，
-    /// 模组本身不做任何强度换算——映射由 DGStudio 侧表达式完成。
-    /// 脉冲值经 DrainPulses 交给 DataClient 后只上报一次并自动回零，
-    /// 不作为持续数值驻留在上报载荷里。
-    /// </summary>
     public sealed class VitalSampler
     {
         private readonly LinkConfig _cfg;
@@ -85,7 +75,6 @@ namespace AliceInCradleLink
             Ep = ep;
             if (_noel.EpCon != null) OrgasmCount = _noel.EpCon.getOrgasmedTotal();
 
-            // 差分仅作钩子未覆盖通道的回退；基线照常推进，避免事件与差分双计
             var diffHp = Diff(ref _hp, hp);
             if (!_hooks.Hurt && diffHp < 0) Signal("Hurt", -diffHp, "受伤");
             else if (!_hooks.Heal && diffHp > 0) Signal("Heal", diffHp, "回血");
@@ -98,12 +87,10 @@ namespace AliceInCradleLink
             if (diffOrgasm > 0)
             {
                 _orgasmEnds = DateTime.UtcNow.AddMilliseconds(Math.Max(0, _cfg.OrgasmHoldMs.Value));
-                // 累计计数走连续值字段每拍上报；这里只刷新面板事件指示
                 Note(OrgasmCount, "高潮");
             }
         }
 
-        /// <summary>重新挂接时清空基线，避免把场景切换的数值跳变当成信号。</summary>
         public void Reset()
         {
             _hp = null;
@@ -113,13 +100,10 @@ namespace AliceInCradleLink
             lock (_gate) _pending.Clear();
         }
 
-        /// <summary>注入事件钩子安装结果（各通道是否由真实事件提供）。</summary>
         public void SetHooks(HookStatus hooks)
         {
             _hooks = hooks ?? new HookStatus();
         }
-
-        // --- EventHooks 回调：游戏调用事件（主线程） -------------------
 
         public void OnEventHurt(int amount)
         {
@@ -141,7 +125,6 @@ namespace AliceInCradleLink
             if (amount > 0) Signal("MpGain", amount, "回蓝");
         }
 
-        /// <summary>合并最新连续值载荷：HP/MP 等每拍常驻的数值字段。</summary>
         public void Collect(Dictionary<string, float> sink)
         {
             if (!Ready) return;
@@ -154,7 +137,6 @@ namespace AliceInCradleLink
             sink["Orgasming"] = DateTime.UtcNow < _orgasmEnds ? 1f : 0f;
         }
 
-        /// <summary>取走本帧产生的差分脉冲（取后清空），交给脉冲通道上报。</summary>
         public void DrainPulses(Dictionary<string, float> sink)
         {
             lock (_gate)
@@ -177,7 +159,6 @@ namespace AliceInCradleLink
 
         private void Signal(string name, float value, string label)
         {
-            // 同帧内可能多次事件（连续多段伤害等）：按名字累加成一次总量
             lock (_gate)
                 _pending[name] = (_pending.TryGetValue(name, out var cur)
                                       ? cur : 0f) + value;
@@ -185,7 +166,6 @@ namespace AliceInCradleLink
             LastSignal = label + " " + Mathf.RoundToInt(value);
         }
 
-        /// <summary>只刷新面板事件指示：值本身已在连续值字段里每拍上报。</summary>
         private void Note(float value, string label)
         {
             SignalCount++;

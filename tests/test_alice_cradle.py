@@ -1,4 +1,3 @@
-"""alice_cradle 模块测试（纯新协议）：/data 接收、核心参数双向映射派发与回传。"""
 from __future__ import annotations
 
 import os
@@ -26,7 +25,6 @@ def _free_port() -> int:
 
 
 class FakeCtx:
-    """替代 ModuleContext：记录核心参数派发器对引擎的全部调用。"""
 
     def __init__(self, state: EngineState | None = None):
         self.calls: list[tuple] = []
@@ -92,7 +90,6 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(resp["received"]), ["HP", "HPmax"])
         await asyncio.sleep(0.02)
         self.assertIn(("strength", "A", 120), self.ctx.calls)
-        # 同值重复上报不再派发
         n = len(self.ctx.calls)
         await self.post("/data", {"HP": 60, "HPmax": 100})
         await asyncio.sleep(0.02)
@@ -111,7 +108,6 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp["status"], 0)
 
     async def test_get_data_default_core_outputs(self):
-        # 未配置输出行时 GET /data 回退为核心输出参数实时值 + 短名别名
         code, resp = await self.get("/data")
         self.assertEqual(code, 200)
         data = resp["data"]
@@ -142,7 +138,6 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
 class ExpressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_device_vars_mix_and_clamp(self):
-        # 用户口径示例：{Strength-max}*({HP}+{Hurt}/{HPmax}) 取整钳制
         ctx = FakeCtx()
         srv = GameDataServer(ctx, {
             "mappings": [{"param": "in_strength_a",
@@ -152,11 +147,10 @@ class ExpressionTests(unittest.IsolatedAsyncioTestCase):
         srv.engine.signal("Hurt", 30)
         srv.engine.signal("HPmax", 100)
         await asyncio.sleep(0)
-        # Strength=0 → 负值钳到 0
         self.assertEqual(srv.engine.last_values["in_strength_a"], 0)
         slot = ctx.state.slots["s1"]
         slot.strength["A"] = 300
-        srv.engine.signal("HP", 61)      # 触发重算
+        srv.engine.signal("HP", 61)
         await asyncio.sleep(0.02)
         self.assertEqual(srv.engine.last_values["in_strength_a"], 200)
         self.assertIn(("strength", "A", 200), ctx.calls)
