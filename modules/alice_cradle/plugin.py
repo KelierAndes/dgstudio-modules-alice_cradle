@@ -2,32 +2,49 @@
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.6.5",
-    "description": "游戏侧 MOD 仅上报 HP/MP 等命名数值，本模块按核心参数映射表"
-                   "求值驱动设备，并把设备状态表达式回传游戏（HTTP + JSON）。",
+    "version": "0.7.1",
+    "description": "游戏侧 MOD 上报 HP/MP 等命名数值，本模块把它们与设备读数"
+                   "登记成变量供「事件流」取用，并把设备读数按同名字段回传游戏"
+                   "（HTTP + JSON）；本模块不下发设备动作。",
     "settings_key": "alice_cradle",
     "actions": [],
     "mods": {"dest": "BepInEx/plugins/AliceInCradleLink",
              "marker": "AliceInCradle.exe"},
     "params": {
-        "HP": {"label": "当前生命", "desc": "玩家当前 HP"},
-        "HPmax": {"label": "生命上限", "desc": "玩家 HP 上限"},
-        "MP": {"label": "当前魔力", "desc": "玩家当前 MP"},
-        "MPmax": {"label": "魔力上限", "desc": "玩家 MP 上限"},
-        "EP": {"label": "兴奋度", "desc": "累计兴奋度"},
-        "Hurt": {"label": "本期掉血", "desc": "伤害事件实际造成的 HP 减少量（游戏事件钩子，含血量清零后的过量伤害）"},
-        "Heal": {"label": "本期回血", "desc": "回血事件实际回复的 HP 增加量（游戏事件钩子，钳满时无虚增脉冲）"},
-        "MpLost": {"label": "本期耗蓝", "desc": "耗蓝事件实际消耗的 MP（游戏事件钩子；魔力槽空时的施放按请求消耗量上报）"},
-        "MpGain": {"label": "本期回蓝", "desc": "回蓝事件实际回复的 MP（游戏事件钩子）"},
-        "Orgasm": {"label": "高潮次数", "desc": "本局累计高潮次数"},
-        "Orgasming": {"label": "高潮中", "desc": "高潮效果持续期间为 1"},
+        "HP": {"label": "当前生命", "desc": "玩家当前 HP", "dir": "in",
+               "type": "Float"},
+        "HPmax": {"label": "生命上限", "desc": "玩家 HP 上限", "dir": "in",
+                  "type": "Float"},
+        "MP": {"label": "当前魔力", "desc": "玩家当前 MP", "dir": "in",
+               "type": "Float"},
+        "MPmax": {"label": "魔力上限", "desc": "玩家 MP 上限", "dir": "in",
+                  "type": "Float"},
+        "EP": {"label": "兴奋度", "desc": "累计兴奋度", "dir": "in",
+               "type": "Float"},
+        "Hurt": {"label": "本期掉血", "desc": "伤害事件实际造成的 HP 减少量（游戏事件钩子，含血量清零后的过量伤害）",
+                 "dir": "in", "type": "Float"},
+        "Heal": {"label": "本期回血", "desc": "回血事件实际回复的 HP 增加量（游戏事件钩子，钳满时无虚增脉冲）",
+                 "dir": "in", "type": "Float"},
+        "MpLost": {"label": "本期耗蓝", "desc": "耗蓝事件实际消耗的 MP（游戏事件钩子；魔力槽空时的施放按请求消耗量上报）",
+                   "dir": "in", "type": "Float"},
+        "MpGain": {"label": "本期回蓝", "desc": "回蓝事件实际回复的 MP（游戏事件钩子）",
+                   "dir": "in", "type": "Float"},
+        "Orgasm": {"label": "高潮次数", "desc": "本局累计高潮次数", "dir": "in",
+                   "type": "Int"},
+        "Orgasming": {"label": "高潮中", "desc": "高潮效果持续期间为 1",
+                      "dir": "in", "type": "Bool"},
     },
     "reads": {
-        "StrengthA": {"label": "设备通道 A 强度", "name": "StrengthA"},
-        "StrengthB": {"label": "设备通道 B 强度", "name": "StrengthB"},
-        "Battery": {"label": "设备电量", "name": "Battery"},
-        "Connected": {"label": "连接状态", "name": "Connected"},
-        "Pressure": {"label": "气压 (kPa)", "name": "Pressure"},
+        "StrengthA": {"label": "设备通道 A 强度", "name": "StrengthA",
+                      "dir": "in", "type": "Int"},
+        "StrengthB": {"label": "设备通道 B 强度", "name": "StrengthB",
+                      "dir": "in", "type": "Int"},
+        "Battery": {"label": "设备电量", "name": "Battery", "dir": "in",
+                    "type": "Int"},
+        "Connected": {"label": "连接状态", "name": "Connected", "dir": "in",
+                      "type": "Bool"},
+        "Pressure": {"label": "气压 (kPa)", "name": "Pressure", "dir": "in",
+                     "type": "Float"},
     },
     "config": {
         "host": {
@@ -40,21 +57,9 @@ META = {
             "desc": "Unity MOD 收发的 HTTP 端口",
         },
         "rate": {
-            "label": "状态重算间隔", "type": "float", "default": 0.2,
+            "label": "设备读数采样间隔", "type": "float", "default": 0.2,
             "min": 0.05, "max": 5.0, "step": 0.05, "unit": "s",
-            "group": "bridge", "desc": "设备状态变量参与运算时的重算节流",
-        },
-        "mappings": {
-            "label": "输入映射表", "type": "list", "default": [],
-            "group": "map", "rows": "in",
-            "desc": "行 {param: 核心输入参数, expr: 表达式}，变量 {名称} 可混合"
-                    "本模块参数与核心输出参数，结果取整钳制后派发",
-        },
-        "outputs": {
-            "label": "输出映射表", "type": "list", "default": [],
-            "group": "map", "rows": "out",
-            "desc": "行 {param: 核心输出参数, name: 回传给游戏的字段名, "
-                    "expr: 表达式}，字段名可自由更改",
+            "group": "bridge", "desc": "设备读数变量多久刷新一次",
         },
     },
 }
@@ -64,6 +69,9 @@ from plugins import ModuleBase, spec_defaults
 from modules.alice_cradle.server import GameDataServer
 
 _CONFIG_DEFAULTS = spec_defaults(META["config"])
+
+# 映射表时代留下的设置项：换算与设备派发已全部迁到「事件流」画布
+_LEGACY_KEYS = ("mappings", "outputs", "output_map")
 
 
 class AliceCradleModule(ModuleBase):
@@ -80,19 +88,18 @@ class AliceCradleModule(ModuleBase):
     def config_spec(self) -> dict:
         return META["config"]
 
-    def link_params(self) -> list[tuple[str, str]]:
-        return [(name, str(item.get("label") or name))
+    def link_params(self) -> list[dict]:
+        """游戏上报的通道：模块产出的读数，事件流只读。"""
+        return [{"name": name, "label": str(item.get("label") or name),
+                 "dir": str(item.get("dir") or "in"),
+                 "type": str(item.get("type") or "Float"),
+                 "desc": str(item.get("desc") or "")}
                 for name, item in META["params"].items()]
-
-    def read_params(self) -> list[tuple[str, str]]:
-        return [(signal, str(item.get("label") or signal))
-                for signal, item in META["reads"].items()]
 
     def on_load(self, ctx) -> None:
         self.ctx = ctx
-        migrate_legacy(ctx.settings)
         drop_legacy_family(ctx.settings)
-        materialize_reads(ctx.settings)
+        drop_mapping_tables(ctx.settings, ctx.log)
 
     def on_unload(self) -> None:
         if self.server is not None:
@@ -106,7 +113,7 @@ class AliceCradleModule(ModuleBase):
         await self.stop()
         cfg = {k: self.ctx.settings.get(k, default)
                for k, default in _CONFIG_DEFAULTS.items()}
-        self.server = GameDataServer(self.ctx, cfg)
+        self.server = GameDataServer(self.ctx, cfg, META["reads"])
         try:
             await self.server.start()
         except OSError as exc:
@@ -117,10 +124,9 @@ class AliceCradleModule(ModuleBase):
     async def reload_config(self) -> None:
         if self.server is None:
             return
-        for key in ("rate", "mappings", "outputs"):
+        for key in ("rate",):
             self.server.config[key] = self.ctx.settings.get(
                 key, _CONFIG_DEFAULTS[key])
-        self.server.apply_config()
 
     async def stop(self) -> None:
         if self.server is not None:
@@ -131,26 +137,17 @@ class AliceCradleModule(ModuleBase):
         return self.server is not None and self.server.is_running()
 
 
-def migrate_legacy(settings: dict) -> bool:
-    old = settings.get("output_map")
-    if not isinstance(old, dict) or not old:
+def drop_mapping_tables(settings: dict, log=None) -> bool:
+    """清除映射表时代的设置项：换算与派发都改在事件流里用写入卡片表达。"""
+    stale = [key for key in _LEGACY_KEYS if key in settings]
+    if not stale:
         return False
-    rows = list(settings.get("outputs") or [])
-    known = {str(row.get("param") or "") for row in rows if isinstance(row, dict)}
-    from dglab.params import output_spec
-
-    for key, name in old.items():
-        if key in known:
-            continue
-        spec = output_spec(str(key)) or {}
-        rows.append({"param": str(key),
-                     "name": str(name or "").strip() or str(key),
-                     "expr": "{" + str(key) + "}",
-                     "type": str(spec.get("type") or "Int")})
-    settings["outputs"] = rows
-    settings.pop("output_map", None)
-    if hasattr(settings, "save"):
-        settings.save()
+    for key in stale:
+        settings.pop(key, None)
+    if log is not None:
+        log("映射表时代的设置项（" + "、".join(stale) +
+            "）已清除：模块只登记变量，换算与设备动作请在「事件流」里"
+            "用写入卡片驱动")
     return True
 
 
@@ -161,34 +158,3 @@ def drop_legacy_family(settings: dict) -> bool:
     if hasattr(settings, "save"):
         settings.save()
     return True
-
-
-def materialize_reads(settings: dict) -> bool:
-    if any(isinstance(row, dict) and str(row.get("name") or "").strip()
-           for row in (settings.get("outputs") or [])):
-        return False
-    rows = []
-    for signal, item in META["reads"].items():
-        spec = _signal_spec(signal)
-        if spec is None:
-            continue
-        rows.append({"param": spec["key"],
-                     "name": str(item.get("name") or signal),
-                     "expr": "{" + spec["key"] + "}",
-                     "type": str(spec.get("type") or "Int")})
-    if not rows:
-        return False
-    settings["outputs"] = rows
-    if hasattr(settings, "save"):
-        settings.save()
-    return True
-
-
-def _signal_spec(signal: str) -> dict | None:
-    from dglab.params import output_specs
-
-    for family in ("COYOTE", "OVC", "BMTR"):
-        for spec in output_specs(family, 1):
-            if spec["signal"] == str(signal):
-                return spec
-    return None

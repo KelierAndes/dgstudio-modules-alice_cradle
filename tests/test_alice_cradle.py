@@ -11,7 +11,12 @@ import json
 import unittest
 
 from dglab.state import EngineState, Slot
-from modules.alice_cradle.server import GameDataServer
+from modules.alice_cradle.server import GameDataServer, read_rows
+
+# 宿主 ModuleContext 已拦下的设备直写方法：模块一旦调用就必须炸出来
+BLOCKED_METHODS = ("set_strength", "add_strength", "reset_strength", "set_wave",
+                   "push_pulse_stream", "fire", "fire_start", "fire_stop",
+                   "zap", "set_intensity_param")
 
 
 def _free_port() -> int:
@@ -25,9 +30,9 @@ def _free_port() -> int:
 
 
 class FakeCtx:
+    """只读侧的宿主桩：提供状态与日志，设备写方法由 GuardedCtx 另行拦截。"""
 
     def __init__(self, state: EngineState | None = None):
-        self.calls: list[tuple] = []
         self.logs: list[str] = []
         self.state = state or EngineState(
             connected=True, paired=True,
@@ -49,33 +54,44 @@ class FakeCtx:
     def wave_selection(self) -> dict:
         return {"A": "呼吸", "B": ""}
 
-    async def set_strength(self, channel, value, slot_id=None):
-        self.state.slots["s1"].strength[channel] = value
-        self.calls.append(("strength", channel, value))
 
-    async def zap(self, channel, seconds=1.0, slot_id=None):
-        self.calls.append(("zap", channel, round(seconds, 3)))
+class GuardedCtx(FakeCtx):
+    """任何设备直写都立刻抛错：模块跑完整周期必须一次都不碰到它。"""
 
-    async def set_wave(self, channel, name, slot_id=None):
-        self.calls.append(("wave", channel, name))
+    def __init__(self, state: EngineState | None = None):
+        super().__init__(state)
+        self.settings: dict = {}
+        self.touched: list[str] = []
 
-    async def fire_start(self, slot_id=None, channel=None):
-        self.calls.append(("fire", "start", channel))
+    def emergency_stop(self):
+        self.touched.append("emergency_stop")
 
-    async def fire_stop(self, slot_id=None, channel=None):
-        self.calls.append(("fire", "stop", channel))
+    def submit(self, coro):
+        coro.close()
+        return None
 
-    async def emergency_stop(self):
-        self.calls.append(("emergency",))
+
+def _block(name: str):
+    def _raise(self, *args, **kwargs):
+        self.touched.append(name)
+        raise AssertionError(f"模块直写设备被调用：{name}()")
+    return _raise
+
+
+for _name in BLOCKED_METHODS:
+    setattr(GuardedCtx, _name, _block(_name))
+
+
+def _server(ctx, config=None) -> GameDataServer:
+    from modules.alice_cradle.plugin import META
+
+    return GameDataServer(ctx, config, META["reads"])
 
 
 class RoutingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.ctx = FakeCtx()
-        self.srv = GameDataServer(self.ctx, {
-            "mappings": [{"param": "in_strength_a",
-                          "expr": "{HP}/{HPmax}*200"}]})
-        self.srv.apply_config()
+        self.srv = _server(self.ctx)
 
     async def post(self, path, payload):
         body = json.dumps(payload).encode()
@@ -84,16 +100,14 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
     async def get(self, path):
         return await self.srv._route("GET", path, b"")
 
-    async def test_post_data_feeds_engine_and_dispatches(self):
+    async def test_post_data_publishes_signals_only(self):
         code, resp = await self.post("/data", {"HP": 60, "HPmax": 100})
         self.assertEqual(code, 200)
         self.assertEqual(sorted(resp["received"]), ["HP", "HPmax"])
-        await asyncio.sleep(0.02)
-        self.assertIn(("strength", "A", 120), self.ctx.calls)
-        n = len(self.ctx.calls)
-        await self.post("/data", {"HP": 60, "HPmax": 100})
-        await asyncio.sleep(0.02)
-        self.assertEqual(len(self.ctx.calls), n)
+        self.assertEqual(self.srv.engine.signals["HP"], 60.0)
+        self.assertEqual(self.srv.engine.signals["HPmax"], 100.0)
+        self.assertEqual(self.srv.engine.mappings, {})
+        self.assertEqual(self.srv.engine.outputs, [])
 
     async def test_non_numeric_values_ignored(self):
         code, resp = await self.post("/data", {"name": "alice", "HP": 50,
@@ -107,92 +121,94 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, 200)
         self.assertEqual(resp["status"], 0)
 
-    async def test_get_data_default_core_outputs(self):
+    async def test_get_data_returns_device_reads(self):
         code, resp = await self.get("/data")
         self.assertEqual(code, 200)
         data = resp["data"]
-        self.assertEqual(data["COYOTE.StrengthA"], 0)
-        self.assertEqual(data["COYOTE.Battery"], 77)
-        self.assertEqual(data["max"], 200)
+        self.assertEqual(sorted(data), ["Battery", "Connected", "Pressure",
+                                         "StrengthA", "StrengthB"])
+        self.assertEqual(data["StrengthA"], 0)
+        self.assertEqual(data["Battery"], 77)
+        self.assertIs(data["Connected"], True)
 
-    async def test_get_data_renamed_output_rows(self):
-        srv = GameDataServer(FakeCtx(), {"outputs": [
-            {"param": "COYOTE.Battery", "name": "batteryPct",
-             "expr": "{COYOTE.Battery}", "type": "Int"}]})
-        srv.apply_config()
-        code, resp = await srv._route("GET", "/data", b"")
-        self.assertEqual(resp["data"], {"batteryPct": 77})
+    async def test_get_data_tracks_device_state(self):
+        self.ctx.state.slots["s1"].strength["A"] = 120
+        code, resp = await self.get("/data")
+        self.assertEqual(resp["data"]["StrengthA"], 120)
 
     async def test_status(self):
         await self.post("/data", {"HP": 30})
         code, resp = await self.get("/status")
-        self.assertEqual(resp["mappings"],
-                         {"in_strength_a": "{HP}/{HPmax}*200"})
+        self.assertEqual(code, 200)
         self.assertEqual(resp["signals"]["HP"], 30.0)
+        self.assertEqual(resp["output_values"]["Battery"], 77)
+        self.assertNotIn("mappings", resp)
+        self.assertNotIn("outputs", resp)
 
     async def test_unknown_paths(self):
         self.assertEqual((await self.get("/api/game/all"))[0], 404)
         self.assertEqual((await self.get("/healthz"))[0], 404)
         self.assertEqual((await self.post("/other", {}))[0], 404)
 
+    async def test_engine_keeps_host_required_members(self):
+        self.assertIsInstance(self.srv.engine.signals, dict)
+        self.assertIsInstance(self.srv.engine.errors, dict)
+        self.srv.engine.pump()
+        self.srv.engine.signal("HP", 12)
+        self.assertEqual(self.srv.engine.values()["HP"], 12.0)
 
-class ExpressionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_device_vars_mix_and_clamp(self):
-        ctx = FakeCtx()
-        srv = GameDataServer(ctx, {
-            "mappings": [{"param": "in_strength_a",
-                          "expr": "{Strength-max}*({HP}+{Hurt}/{HPmax})"}]})
-        srv.apply_config()
-        srv.engine.signal("HP", 60)
-        srv.engine.signal("Hurt", 30)
-        srv.engine.signal("HPmax", 100)
-        await asyncio.sleep(0)
-        self.assertEqual(srv.engine.last_values["in_strength_a"], 0)
-        slot = ctx.state.slots["s1"]
-        slot.strength["A"] = 300
-        srv.engine.signal("HP", 61)
-        await asyncio.sleep(0.02)
-        self.assertEqual(srv.engine.last_values["in_strength_a"], 200)
-        self.assertIn(("strength", "A", 200), ctx.calls)
 
-    async def test_fire_and_emergency_targets(self):
+class ReadRowTests(unittest.TestCase):
+    def test_read_rows_resolve_core_keys(self):
+        rows = {row["name"]: row for row in read_rows({
+            "StrengthA": {"name": "StrengthA", "type": "Int"},
+            "Battery": {"name": "Battery", "type": "Int"},
+            "Connected": {"name": "Connected", "type": "Bool"},
+            "Pressure": {"name": "Pressure", "type": "Float"},
+            "NoSuchSignal": {"name": "NoSuchSignal"}})}
+        self.assertEqual(rows["StrengthA"]["key"], "COYOTE.StrengthA")
+        self.assertEqual(rows["Battery"]["key"], "COYOTE.Battery")
+        self.assertEqual(rows["Pressure"]["key"], "BMTR.Pressure")
+        self.assertNotIn("NoSuchSignal", rows)
+
+    def test_sampling_publishes_reads_into_signals(self):
         ctx = FakeCtx()
-        srv = GameDataServer(ctx, {"mappings": [
-            {"param": "in_fire", "expr": "{danger}"},
-            {"param": "in_fire_a", "expr": "{danger}"},
-            {"param": "in_emergency", "expr": "{dead}"}]})
-        srv.apply_config()
-        srv.engine.signal("danger", 1)
-        await asyncio.sleep(0.02)
-        self.assertIn(("fire", "start", None), ctx.calls)
-        self.assertIn(("fire", "start", "A"), ctx.calls)
-        srv.engine.signal("danger", 0)
-        await asyncio.sleep(0.02)
-        self.assertIn(("fire", "stop", None), ctx.calls)
-        self.assertIn(("fire", "stop", "A"), ctx.calls)
-        srv.engine.signal("dead", 1)
-        await asyncio.sleep(0.02)
-        self.assertIn(("emergency",), ctx.calls)
+        ctx.state.slots["s1"].strength = {"A": 88, "B": 12}
+        srv = _server(ctx)
+        srv._sample_reads()
+        self.assertEqual(srv.engine.signals["StrengthA"], 88.0)
+        self.assertEqual(srv.engine.signals["StrengthB"], 12.0)
+        self.assertEqual(srv.engine.signals["Battery"], 77.0)
+        self.assertEqual(srv.engine.signals["Connected"], 1.0)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_stop_over_real_socket(self):
         ctx = FakeCtx()
-        srv = GameDataServer(ctx, {"port": _free_port(), "host": "127.0.0.1",
-                                   "mappings": [
-                {"param": "in_strength_a", "expr": "{HP}"}]})
+        srv = _server(ctx, {"port": _free_port(), "host": "127.0.0.1"})
         await srv.start()
         try:
             port = srv._server.sockets[0].getsockname()[1]
             code, resp = await self._request(port, "POST", "/data", {"HP": 42})
             self.assertEqual(code, 200)
-            await asyncio.sleep(0.05)
-            self.assertIn(("strength", "A", 42), ctx.calls)
+            self.assertEqual(resp["received"], ["HP"])
             code, resp = await self._request(port, "GET", "/data")
-            self.assertEqual(resp["data"]["COYOTE.StrengthA"], 42)
+            self.assertEqual(resp["data"]["Battery"], 77)
         finally:
             await srv.stop()
         self.assertFalse(srv.is_running())
+
+    async def test_sampling_loop_runs_while_started(self):
+        ctx = FakeCtx()
+        srv = _server(ctx, {"port": _free_port(), "host": "127.0.0.1",
+                            "rate": 0.05})
+        await srv.start()
+        try:
+            ctx.state.slots["s1"].strength["A"] = 65
+            await asyncio.sleep(0.2)
+            self.assertEqual(srv.engine.signals["StrengthA"], 65.0)
+        finally:
+            await srv.stop()
 
     async def _request(self, port, method, path, payload=None):
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
@@ -216,6 +232,38 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         return code, out
 
 
+class GuardTests(unittest.IsolatedAsyncioTestCase):
+    """模块全程不碰设备：一个会对直写抛错的宿主桩要撑过完整生命周期。"""
+
+    async def test_full_module_cycle_never_touches_device(self):
+        from modules.alice_cradle.plugin import AliceCradleModule
+
+        ctx = GuardedCtx()
+        ctx.settings["port"] = _free_port()
+        ctx.settings["host"] = "127.0.0.1"
+        ctx.settings["rate"] = 0.05
+        mod = AliceCradleModule()
+        mod.on_load(ctx)
+        await mod.start()
+        try:
+            await mod.server._route("POST", "/data",
+                                    json.dumps({"HP": 50, "Orgasming": 1})
+                                    .encode())
+            for _ in range(5):
+                ctx.state.slots["s1"].strength["A"] = 30
+                mod.server._sample_reads()
+                mod.server.engine.pump()
+            await mod.reload_config()
+            code, resp = await mod.server._route("GET", "/data", b"")
+            self.assertEqual(code, 200)
+            self.assertEqual(resp["data"]["StrengthA"], 30)
+            self.assertEqual(mod.server.engine.signals["HP"], 50.0)
+            self.assertEqual(ctx.touched, [])
+        finally:
+            await mod.stop()
+            mod.on_unload()
+
+
 class PluginMetaTests(unittest.TestCase):
     def test_meta_is_literal_and_class_found(self):
         import _bootstrap
@@ -226,53 +274,66 @@ class PluginMetaTests(unittest.TestCase):
         meta = plugins._read_meta(path)
         self.assertEqual(meta["id"], "alice_cradle")
         self.assertEqual(meta["settings_key"], "alice_cradle")
-        self.assertIn("mappings", meta["config"])
-        self.assertIn("outputs", meta["config"])
+        self.assertNotIn("mappings", meta["config"])
+        self.assertNotIn("outputs", meta["config"])
         self.assertNotIn("output_map", meta["config"])
+        self.assertEqual(set(meta["config"]), {"host", "port", "rate"})
         self.assertIn("HP", meta["params"])
         self.assertIn("StrengthA", meta["reads"])
         cls = plugins._load_plugin_class("alice_cradle", path)
         self.assertEqual(cls.__name__, "AliceCradleModule")
         inst = cls()
         self.assertFalse(inst.is_running())
-        self.assertIn(("HP", "当前生命"), inst.link_params())
-        self.assertIn(("StrengthA", "设备通道 A 强度"), inst.read_params())
+
+    def test_declared_rows_carry_direction_and_type(self):
+        from modules.alice_cradle.plugin import AliceCradleModule
+
+        from modules.alice_cradle.plugin import META
+
+        inst = AliceCradleModule()
+        params = inst.link_params()
+        self.assertTrue(all(isinstance(row, dict) for row in params))
+        by = {row["name"]: row for row in params}
+        self.assertEqual(sorted(by), sorted(META["params"]))
+        self.assertEqual({row["dir"] for row in params}, {"in"})
+        self.assertEqual(by["HP"]["type"], "Float")
+        self.assertEqual(by["Orgasming"]["type"], "Bool")
+        # 设备读数只回传给游戏，不再登记进共享变量表（核心读出本来就有）
+        self.assertEqual(list(inst.read_params()), [])
+        self.assertNotIn("StrengthA", by)
+        self.assertTrue(any(row["name"] == "StrengthA"
+                            for row in read_rows(META["reads"])))
+
+    def test_host_can_find_module_variables(self):
+        """宿主登记变量只走 link_params + runtime.engine.signals。"""
+        from modules.alice_cradle.plugin import AliceCradleModule, META
+
+        inst = AliceCradleModule()
+        inst.ctx = FakeCtx()
+        inst.server = _server(inst.ctx)
+        names = {row["name"] for row in inst.link_params()}
+        self.assertEqual(names, set(META["params"]))
+        runtime = getattr(inst, "bridge", None) or getattr(inst, "server", None)
+        self.assertIs(getattr(runtime, "engine", None), inst.server.engine)
 
 
-class MigrateTests(unittest.TestCase):
-    def test_legacy_output_map_to_rows(self):
-        from modules.alice_cradle.plugin import migrate_legacy
+class DropMappingTablesTests(unittest.TestCase):
+    def test_stale_keys_popped_with_one_chinese_log(self):
+        from modules.alice_cradle.plugin import drop_mapping_tables
 
-        settings = {"output_map": {"COYOTE.Battery": "batt"}}
-        self.assertTrue(migrate_legacy(settings))
-        self.assertNotIn("output_map", settings)
-        row = next(r for r in settings["outputs"]
-                   if r["param"] == "COYOTE.Battery")
-        self.assertEqual(row["name"], "batt")
-
-
-class MaterializeReadsTests(unittest.TestCase):
-    def test_empty_outputs_get_default_read_fields(self):
-        from modules.alice_cradle.plugin import materialize_reads
-
-        settings = {}
-        self.assertTrue(materialize_reads(settings))
-        rows = {row["name"]: row for row in settings["outputs"]}
-        self.assertEqual(set(rows), {"StrengthA", "StrengthB", "Battery",
-                                     "Connected", "Pressure"})
-        self.assertEqual(rows["StrengthA"]["param"], "COYOTE.StrengthA")
-        self.assertEqual(rows["StrengthA"]["expr"], "{COYOTE.StrengthA}")
-        self.assertEqual(rows["Connected"]["type"], "Bool")
-        self.assertEqual(rows["Pressure"]["param"], "BMTR.Pressure")
-
-    def test_existing_outputs_untouched(self):
-        from modules.alice_cradle.plugin import materialize_reads
-
-        settings = {"outputs": [{"param": "COYOTE.Battery", "name": "batt",
-                                 "expr": "{COYOTE.Battery}", "type": "Int"}]}
-        self.assertFalse(materialize_reads(settings))
-        self.assertEqual([row["name"] for row in settings["outputs"]],
-                         ["batt"])
+        settings = {"mappings": [{"param": "in_strength_a", "expr": "{HP}"}],
+                    "outputs": [{"param": "COYOTE.Battery", "name": "batt"}],
+                    "output_map": {"COYOTE.Battery": "batt"},
+                    "port": 8920}
+        logs: list[str] = []
+        self.assertTrue(drop_mapping_tables(settings, logs.append))
+        for key in ("mappings", "outputs", "output_map"):
+            self.assertNotIn(key, settings)
+        self.assertEqual(settings["port"], 8920)
+        self.assertEqual(len(logs), 1)
+        self.assertIn("事件流", logs[0])
+        self.assertFalse(drop_mapping_tables(settings, logs.append))
+        self.assertEqual(len(logs), 1)
 
     def test_legacy_family_dropped(self):
         from modules.alice_cradle.plugin import drop_legacy_family
