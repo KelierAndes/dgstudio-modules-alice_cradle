@@ -2,7 +2,7 @@
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.7.1",
+    "version": "0.7.2",
     "description": "游戏侧 MOD 上报 HP/MP 等命名数值，本模块把它们与设备读数"
                    "登记成变量供「事件流」取用，并把设备读数按同名字段回传游戏"
                    "（HTTP + JSON）；本模块不下发设备动作。",

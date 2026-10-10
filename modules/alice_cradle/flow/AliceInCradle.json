@@ -1,0 +1,391 @@
+{
+  "version": 3,
+  "name": "AliceInCradle",
+  "saved_at": "2026-10-11 01:41:15",
+  "graphs": {
+    "input": {
+      "page": "input",
+      "nodes": [
+        {
+          "id": "i83",
+          "def": "mod.period",
+          "x": 734.56640625,
+          "y": 40.0,
+          "params": {
+            "period_ms": 50,
+            "var": ""
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i84",
+          "def": "mod.read.alice_cradle.HPmax",
+          "x": 453.51953125,
+          "y": 40.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "HPmax"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i85",
+          "def": "mod.read.alice_cradle.HP",
+          "x": 453.51953125,
+          "y": 117.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "HP"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i86",
+          "def": "mod.read.alice_cradle.MPmax",
+          "x": 453.51953125,
+          "y": 194.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "MPmax"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i87",
+          "def": "mod.read.alice_cradle.MP",
+          "x": 453.51953125,
+          "y": 271.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "MP"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i88",
+          "def": "core.write.in_strength_a",
+          "x": 40.0,
+          "y": 40.0,
+          "params": {
+            "key": "in_strength_a"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i89",
+          "def": "core.write.in_strength_b",
+          "x": 40.0,
+          "y": 117.0,
+          "params": {
+            "key": "in_strength_b"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i90",
+          "def": "core.write.in_ovc_strength_a",
+          "x": 40.0,
+          "y": 194.0,
+          "params": {
+            "key": "in_ovc_strength_a"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i91",
+          "def": "core.write.in_ovc_strength_b",
+          "x": 40.0,
+          "y": 271.0,
+          "params": {
+            "key": "in_ovc_strength_b"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i92",
+          "def": "math.sub",
+          "x": 271.51953125,
+          "y": 40.0,
+          "params": {},
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i95",
+          "def": "math.sub",
+          "x": 271.51953125,
+          "y": 138.0,
+          "params": {},
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i100",
+          "def": "mod.read.alice_cradle.Hurt",
+          "x": 453.51953125,
+          "y": 348.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "Hurt"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i101",
+          "def": "mod.read.alice_cradle.MpLost",
+          "x": 453.51953125,
+          "y": 425.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "MpLost"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i108",
+          "def": "mod.read.alice_cradle.Orgasming",
+          "x": 453.51953125,
+          "y": 502.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "Orgasming"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i109",
+          "def": "core.write.in_ovc_fire_b",
+          "x": 40.0,
+          "y": 348.0,
+          "params": {
+            "key": "in_ovc_fire_b"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "i110",
+          "def": "core.write.in_fire_b",
+          "x": 40.0,
+          "y": 425.0,
+          "params": {
+            "key": "in_fire_b"
+          },
+          "alias": "",
+          "overrides": {}
+        }
+      ],
+      "wires": [
+        {
+          "id": "iw93",
+          "src": [
+            "i84",
+            0
+          ],
+          "dst": [
+            "i92",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw94",
+          "src": [
+            "i85",
+            0
+          ],
+          "dst": [
+            "i92",
+            1
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw96",
+          "src": [
+            "i86",
+            0
+          ],
+          "dst": [
+            "i95",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw97",
+          "src": [
+            "i87",
+            0
+          ],
+          "dst": [
+            "i95",
+            1
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw98",
+          "src": [
+            "i92",
+            0
+          ],
+          "dst": [
+            "i88",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw99",
+          "src": [
+            "i95",
+            0
+          ],
+          "dst": [
+            "i90",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw102",
+          "src": [
+            "i100",
+            0
+          ],
+          "dst": [
+            "i89",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw103",
+          "src": [
+            "i101",
+            0
+          ],
+          "dst": [
+            "i91",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "iw104",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i88",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "iw105",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i89",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "iw106",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i90",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "iw107",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i91",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "iw111",
+          "src": [
+            "i108",
+            0
+          ],
+          "dst": [
+            "i109",
+            0
+          ],
+          "type": "bool"
+        },
+        {
+          "id": "iw112",
+          "src": [
+            "i108",
+            0
+          ],
+          "dst": [
+            "i110",
+            0
+          ],
+          "type": "bool"
+        },
+        {
+          "id": "iw113",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i109",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "iw114",
+          "src": [
+            "i83",
+            0
+          ],
+          "dst": [
+            "i110",
+            -1
+          ],
+          "type": "exec"
+        }
+      ]
+    },
+    "output": {
+      "page": "output",
+      "nodes": [],
+      "wires": []
+    }
+  }
+}
