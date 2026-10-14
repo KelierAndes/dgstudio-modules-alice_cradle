@@ -332,6 +332,7 @@ namespace AliceInCradleLink
             try
             {
                 Request("POST", "/data", body.ToString(Formatting.None));
+                _posted++;
                 MarkOnline(true);
                 return true;
             }
@@ -395,7 +396,6 @@ namespace AliceInCradleLink
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
             {
-                _posted++;
                 return reader.ReadToEnd();
             }
         }

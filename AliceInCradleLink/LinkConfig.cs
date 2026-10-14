@@ -1,3 +1,4 @@
+using System;
 using BepInEx.Configuration;
 using UnityEngine;
 
@@ -18,8 +19,11 @@ namespace AliceInCradleLink
         public ConfigEntry<float> OverlayX;
         public ConfigEntry<float> OverlayY;
 
+        private readonly ConfigFile _file;
+
         public LinkConfig(ConfigFile config)
         {
+            _file = config;
             Enabled = config.Bind("0. 总开关", "启用联动", true,
                 "关闭后模组不再读取游戏状态，也不再与 DGStudio 通信。");
             BaseUrl = config.Bind("0. 总开关", "DGStudio 地址", "http://127.0.0.1:8920",
@@ -43,6 +47,13 @@ namespace AliceInCradleLink
                 "启动时是否显示面板。");
             OverlayX = config.Bind("1. 状态面板", "面板 X", 24f, "面板左上角横坐标。");
             OverlayY = config.Bind("1. 状态面板", "面板 Y", 96f, "面板左上角纵坐标。");
+        }
+
+        // 拖动面板后落盘位置：配置文件被占用时只丢一次位置，不能让绘制逻辑抛异常
+        public void Save()
+        {
+            try { _file.Save(); }
+            catch (Exception) { }
         }
     }
 }

@@ -13,7 +13,7 @@ namespace AliceInCradleLink
     {
         public const string PluginGuid = "dev.dgstudio.alicein_cradle.link";
         public const string PluginName = "AliceInCradleLink";
-        public const string PluginVersion = "0.5.0";
+        public const string PluginVersion = "0.6.0";
 
         private static ManualLogSource Log;
 
