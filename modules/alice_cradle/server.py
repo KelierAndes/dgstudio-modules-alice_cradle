@@ -7,14 +7,12 @@ import time
 from typing import Any
 
 from dglab.mapping import as_number
-from dglab.params import core_alias_values, device_state_values, output_specs
 
 MAX_BODY = 64 * 1024
 
 DEFAULTS = {
     "host": "127.0.0.1",
     "port": 8920,
-    "rate": 0.2,
 }
 
 _BOOL_EPS = 1e-9
@@ -37,31 +35,14 @@ def _typed(value, value_type: str):
     return int(round(float(value)))
 
 
-def signal_spec(signal: str) -> dict | None:
-    """裸信号名（StrengthA/Battery/Pressure…）→ 核心输出参数规格。
-
-    只查 1 号设备：回传给游戏的是「当前这台设备」的读数，与设备家族无关的
-    名字（如 Battery）由核心键 ``COYOTE.Battery`` 落地。
-    """
-    for family in ("COYOTE", "OVC", "BMTR"):
-        for spec in output_specs(family, 1):
-            if spec["signal"] == str(signal):
-                return spec
-    return None
-
-
 def read_rows(reads: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """META["reads"] → 回传字段行（字段名 / 核心键 / 值类型），查不到的丢弃。"""
+    """META["reads"] → 回传字段行（字段名 / 值类型）：值由事件流写入。"""
     rows: list[dict[str, Any]] = []
     for signal, item in (reads or {}).items():
-        spec = signal_spec(str(signal))
-        if spec is None:
-            continue
         item = item if isinstance(item, dict) else {}
         rows.append({"name": str(item.get("name") or signal),
-                     "key": str(spec["key"]),
                      "signal": str(signal),
-                     "type": str(item.get("type") or spec.get("type") or "Int")})
+                     "type": str(item.get("type") or "Int")})
     return rows
 
 
@@ -72,13 +53,12 @@ class _SignalBoard:
     ``flow_host.module_signals`` 的事件流读数、``ui/live.py`` 的概览、
     ``ui/modules_page._var_pool`` 的变量下拉），需要的成员是 ``signals``、
     ``errors`` 与 ``pump()``；``values()`` 给变量下拉提供全部可引用名；
-    ``temps`` 是给宿主 ``attach_temps`` 挂共享变量表用的，本模块不往里写。
-    设备直写（set_strength/set_wave/zap/fire_*）在宿主侧已被拦下，模块的映射表
-    派发层随之整体移除——设备动作改由事件流的写入卡片驱动。
+    ``temps`` 是给宿主 ``attach_temps`` 挂共享变量表用的——回传字段就取这一份
+    里事件流写进来的值。设备直写（set_strength/set_wave/zap/fire_*）在宿主侧已被
+    拦下，模块的映射表派发层随之整体移除——设备动作改由事件流的写入卡片驱动。
     """
 
-    def __init__(self, device_vars=None):
-        self._device_vars = device_vars or (lambda: {})
+    def __init__(self):
         self.signals: dict[str, float] = {}
         self.errors: dict[str, str] = {}
         self.temps: dict[str, float] = {}
@@ -96,10 +76,8 @@ class _SignalBoard:
         self.signals[str(name)] = num
 
     def values(self) -> dict[str, float]:
-        """取值口径：设备读数 < 共享变量 < 本模块发布的读数（与旧映射引擎一致）。"""
-        merged = self._device_vars()
-        for key, value in self.temps.items():
-            merged.setdefault(str(key), value)
+        """取值口径：共享变量 < 本模块发布的读数（与旧映射引擎一致）。"""
+        merged = dict(self.temps)
         merged.update(self.signals)
         return merged
 
@@ -132,15 +110,12 @@ class GameDataServer:
         self._recv: dict[str, float] = {}
         self._last_rx: float | None = None
         self._tasks: set[asyncio.Task] = set()
-        self._pump_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(
             self._handle, str(self.config.get("host") or "127.0.0.1"),
             int(self.config.get("port") or 8920))
         self._running = True
-        self._sample_reads()
-        self._pump_task = asyncio.ensure_future(self._pump_loop())
         self.ctx.log(f"Alice 数据服务已启动 http://{self.config['host']}"
                      f":{self.config['port']}")
 
@@ -155,9 +130,6 @@ class GameDataServer:
 
     def close(self) -> None:
         self._running = False
-        if self._pump_task is not None:
-            self._pump_task.cancel()
-            self._pump_task = None
         if self._server is not None:
             try:
                 self._server.close()
@@ -168,35 +140,10 @@ class GameDataServer:
     def is_running(self) -> bool:
         return self._running
 
-    async def _pump_loop(self) -> None:
-        interval = max(0.05, _num(self.config.get("rate"), 0.2))
-        try:
-            while self._running:
-                await asyncio.sleep(interval)
-                self._sample_reads()
-                self.engine.pump()
-        except asyncio.CancelledError:
-            pass
-
-    def device_vars(self) -> dict[str, float]:
-        try:
-            state = self.ctx.get_state()
-        except Exception:
-            return {}
-        vals = device_state_values(state)
-        vals.update(core_alias_values(vals))
-        return vals
-
-    def _sample_reads(self) -> None:
-        """设备读数 → 同名变量：只读不写，事件流与游戏面板都取这一份。"""
-        vals = self.device_vars()
-        for row in self.read_rows:
-            self.engine.signal(row["name"],
-                               _typed(vals.get(row["key"], 0.0), row["type"]))
-
     def output_values(self) -> dict[str, Any]:
-        vals = self.device_vars()
-        return {row["name"]: _typed(vals.get(row["key"], 0.0), row["type"])
+        """回传给游戏的字段：取事件流写进来的值，没接线就是 0。"""
+        return {row["name"]: _typed(self.ctx.get_temp(row["name"], 0.0),
+                                    row["type"])
                 for row in self.read_rows}
 
     async def _handle(self, reader, writer) -> None:

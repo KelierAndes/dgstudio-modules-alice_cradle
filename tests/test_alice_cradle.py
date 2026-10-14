@@ -30,10 +30,11 @@ def _free_port() -> int:
 
 
 class FakeCtx:
-    """只读侧的宿主桩：提供状态与日志，设备写方法由 GuardedCtx 另行拦截。"""
+    """宿主桩：共享变量表 + 日志。回传字段取的就是这张表。"""
 
     def __init__(self, state: EngineState | None = None):
         self.logs: list[str] = []
+        self.temps: dict[str, float] = {}
         self.state = state or EngineState(
             connected=True, paired=True,
             slots={"s1": Slot(slot_id="s1", name="Coyote 03", type="COYOTE",
@@ -47,6 +48,12 @@ class FakeCtx:
 
     def get_state(self):
         return self.state
+
+    def get_temp(self, key, default=0.0) -> float:
+        return float(self.temps.get(str(key), default))
+
+    def set_temp(self, key, value) -> None:
+        self.temps[str(key)] = float(value)
 
     def wave_order(self, family="COYOTE"):
         return ["静默", "呼吸", "波浪"]
@@ -121,23 +128,36 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, 200)
         self.assertEqual(resp["status"], 0)
 
-    async def test_get_data_returns_device_reads(self):
+    async def test_get_data_returns_written_fields(self):
+        self.ctx.set_temp("StrengthA", 120)
+        self.ctx.set_temp("Battery", 66)
+        self.ctx.set_temp("Connected", 1)
+        self.ctx.set_temp("Pressure", 101.3456)
         code, resp = await self.get("/data")
         self.assertEqual(code, 200)
         data = resp["data"]
         self.assertEqual(sorted(data), ["Battery", "Connected", "Pressure",
-                                         "StrengthA", "StrengthB"])
-        self.assertEqual(data["StrengthA"], 0)
-        self.assertEqual(data["Battery"], 77)
+                                        "StrengthA", "StrengthB"])
+        self.assertEqual(data["StrengthA"], 120)
+        self.assertEqual(data["Battery"], 66)
+        self.assertEqual(data["Pressure"], 101.346)
         self.assertIs(data["Connected"], True)
 
-    async def test_get_data_tracks_device_state(self):
-        self.ctx.state.slots["s1"].strength["A"] = 120
-        code, resp = await self.get("/data")
-        self.assertEqual(resp["data"]["StrengthA"], 120)
+    async def test_unwired_fields_echo_zero(self):
+        """没接线的回传字段就是 0：模块不再自己采样设备读数。"""
+        data = (await self.get("/data"))[1]["data"]
+        self.assertEqual(data["StrengthA"], 0)
+        self.assertEqual(data["Battery"], 0)
+        self.assertIs(data["Connected"], False)
+
+    async def test_written_value_picks_up_without_restart(self):
+        self.assertEqual((await self.get("/data"))[1]["data"]["StrengthB"], 0)
+        self.ctx.set_temp("StrengthB", 45)
+        self.assertEqual((await self.get("/data"))[1]["data"]["StrengthB"], 45)
 
     async def test_status(self):
         await self.post("/data", {"HP": 30})
+        self.ctx.set_temp("Battery", 77)
         code, resp = await self.get("/status")
         self.assertEqual(code, 200)
         self.assertEqual(resp["signals"]["HP"], 30.0)
@@ -159,27 +179,28 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReadRowTests(unittest.TestCase):
-    def test_read_rows_resolve_core_keys(self):
-        rows = {row["name"]: row for row in read_rows({
-            "StrengthA": {"name": "StrengthA", "type": "Int"},
-            "Battery": {"name": "Battery", "type": "Int"},
-            "Connected": {"name": "Connected", "type": "Bool"},
-            "Pressure": {"name": "Pressure", "type": "Float"},
-            "NoSuchSignal": {"name": "NoSuchSignal"}})}
-        self.assertEqual(rows["StrengthA"]["key"], "COYOTE.StrengthA")
-        self.assertEqual(rows["Battery"]["key"], "COYOTE.Battery")
-        self.assertEqual(rows["Pressure"]["key"], "BMTR.Pressure")
-        self.assertNotIn("NoSuchSignal", rows)
+    def test_read_rows_keep_declared_names_and_types(self):
+        rows = {row["signal"]: row for row in read_rows({
+            "StrengthA": {"name": "通道A", "type": "Int"},
+            "Whatever": {}})}
+        self.assertEqual(rows["StrengthA"]["name"], "通道A")
+        self.assertEqual(rows["StrengthA"]["type"], "Int")
+        # 没写 name / type 的声明按信号名与 Int 兜底
+        self.assertEqual(rows["Whatever"]["name"], "Whatever")
+        self.assertEqual(rows["Whatever"]["type"], "Int")
 
-    def test_sampling_publishes_reads_into_signals(self):
+    def test_output_values_follow_declared_type(self):
         ctx = FakeCtx()
-        ctx.state.slots["s1"].strength = {"A": 88, "B": 12}
         srv = _server(ctx)
-        srv._sample_reads()
-        self.assertEqual(srv.engine.signals["StrengthA"], 88.0)
-        self.assertEqual(srv.engine.signals["StrengthB"], 12.0)
-        self.assertEqual(srv.engine.signals["Battery"], 77.0)
-        self.assertEqual(srv.engine.signals["Connected"], 1.0)
+        ctx.set_temp("StrengthA", 88.6)
+        ctx.set_temp("Connected", 0.4)
+        ctx.set_temp("Pressure", 3.14159)
+        out = srv.output_values()
+        self.assertEqual(out["StrengthA"], 89)          # Int：四舍五入
+        self.assertIs(out["Connected"], True)           # Bool：非零即真
+        self.assertEqual(out["Pressure"], 3.142)        # Float：留三位
+        ctx.set_temp("Connected", 0)
+        self.assertIs(srv.output_values()["Connected"], False)
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
@@ -192,23 +213,12 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             code, resp = await self._request(port, "POST", "/data", {"HP": 42})
             self.assertEqual(code, 200)
             self.assertEqual(resp["received"], ["HP"])
+            ctx.set_temp("Battery", 77)
             code, resp = await self._request(port, "GET", "/data")
             self.assertEqual(resp["data"]["Battery"], 77)
         finally:
             await srv.stop()
         self.assertFalse(srv.is_running())
-
-    async def test_sampling_loop_runs_while_started(self):
-        ctx = FakeCtx()
-        srv = _server(ctx, {"port": _free_port(), "host": "127.0.0.1",
-                            "rate": 0.05})
-        await srv.start()
-        try:
-            ctx.state.slots["s1"].strength["A"] = 65
-            await asyncio.sleep(0.2)
-            self.assertEqual(srv.engine.signals["StrengthA"], 65.0)
-        finally:
-            await srv.stop()
 
     async def _request(self, port, method, path, payload=None):
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
@@ -241,7 +251,6 @@ class GuardTests(unittest.IsolatedAsyncioTestCase):
         ctx = GuardedCtx()
         ctx.settings["port"] = _free_port()
         ctx.settings["host"] = "127.0.0.1"
-        ctx.settings["rate"] = 0.05
         mod = AliceCradleModule()
         mod.on_load(ctx)
         await mod.start()
@@ -250,10 +259,8 @@ class GuardTests(unittest.IsolatedAsyncioTestCase):
                                     json.dumps({"HP": 50, "Orgasming": 1})
                                     .encode())
             for _ in range(5):
-                ctx.state.slots["s1"].strength["A"] = 30
-                mod.server._sample_reads()
+                ctx.set_temp("StrengthA", 30)
                 mod.server.engine.pump()
-            await mod.reload_config()
             code, resp = await mod.server._route("GET", "/data", b"")
             self.assertEqual(code, 200)
             self.assertEqual(resp["data"]["StrengthA"], 30)
@@ -277,7 +284,8 @@ class PluginMetaTests(unittest.TestCase):
         self.assertNotIn("mappings", meta["config"])
         self.assertNotIn("outputs", meta["config"])
         self.assertNotIn("output_map", meta["config"])
-        self.assertEqual(set(meta["config"]), {"host", "port", "rate"})
+        self.assertNotIn("rate", meta["config"])
+        self.assertEqual(set(meta["config"]), {"host", "port"})
         self.assertIn("HP", meta["params"])
         self.assertIn("StrengthA", meta["reads"])
         cls = plugins._load_plugin_class("alice_cradle", path)
@@ -286,9 +294,7 @@ class PluginMetaTests(unittest.TestCase):
         self.assertFalse(inst.is_running())
 
     def test_declared_rows_carry_direction_and_type(self):
-        from modules.alice_cradle.plugin import AliceCradleModule
-
-        from modules.alice_cradle.plugin import META
+        from modules.alice_cradle.plugin import AliceCradleModule, META
 
         inst = AliceCradleModule()
         params = inst.link_params()
@@ -298,21 +304,26 @@ class PluginMetaTests(unittest.TestCase):
         self.assertEqual({row["dir"] for row in params}, {"in"})
         self.assertEqual(by["HP"]["type"], "Float")
         self.assertEqual(by["Orgasming"]["type"], "Bool")
-        # 设备读数只回传给游戏，不再登记进共享变量表（核心读出本来就有）
-        self.assertEqual(list(inst.read_params()), [])
+
+        # 回传字段登记成宿主可写的系统参数，读数侧不重复出现
+        reads = inst.read_params()
+        self.assertEqual(sorted(row["name"] for row in reads),
+                         sorted(META["reads"]))
+        self.assertEqual({row["dir"] for row in reads}, {"out"})
+        self.assertEqual({row["type"] for row in reads},
+                         {"Int", "Bool", "Float"})
         self.assertNotIn("StrengthA", by)
-        self.assertTrue(any(row["name"] == "StrengthA"
-                            for row in read_rows(META["reads"])))
 
     def test_host_can_find_module_variables(self):
-        """宿主登记变量只走 link_params + runtime.engine.signals。"""
+        """宿主登记变量走 link_params + read_params，实时值走 runtime.engine.signals。"""
         from modules.alice_cradle.plugin import AliceCradleModule, META
 
         inst = AliceCradleModule()
         inst.ctx = FakeCtx()
         inst.server = _server(inst.ctx)
         names = {row["name"] for row in inst.link_params()}
-        self.assertEqual(names, set(META["params"]))
+        names |= {row["name"] for row in inst.read_params()}
+        self.assertEqual(names, set(META["params"]) | set(META["reads"]))
         runtime = getattr(inst, "bridge", None) or getattr(inst, "server", None)
         self.assertIs(getattr(runtime, "engine", None), inst.server.engine)
 
@@ -324,10 +335,10 @@ class DropMappingTablesTests(unittest.TestCase):
         settings = {"mappings": [{"param": "in_strength_a", "expr": "{HP}"}],
                     "outputs": [{"param": "COYOTE.Battery", "name": "batt"}],
                     "output_map": {"COYOTE.Battery": "batt"},
-                    "port": 8920}
+                    "rate": 0.2, "port": 8920}
         logs: list[str] = []
         self.assertTrue(drop_mapping_tables(settings, logs.append))
-        for key in ("mappings", "outputs", "output_map"):
+        for key in ("mappings", "outputs", "output_map", "rate"):
             self.assertNotIn(key, settings)
         self.assertEqual(settings["port"], 8920)
         self.assertEqual(len(logs), 1)
@@ -342,20 +353,6 @@ class DropMappingTablesTests(unittest.TestCase):
         self.assertTrue(drop_legacy_family(settings))
         self.assertNotIn("family", settings)
         self.assertFalse(drop_legacy_family(settings))
-
-
-class CoreAliasValuesTests(unittest.TestCase):
-    def test_bare_aliases_cross_family(self):
-        from dglab.params import core_alias_values
-
-        vals = {"COYOTE.StrengthA": 10, "COYOTE.LimitA": 200,
-                "COYOTE.Battery": 50, "BMTR.Pressure": 5.2}
-        aliases = core_alias_values(vals)
-        self.assertEqual(aliases["max"], 200)
-        self.assertEqual(aliases["COYOTEmax"], 200)
-        self.assertEqual(aliases["Strength"], 10)
-        self.assertEqual(aliases["Pressure"], 5.2)
-        self.assertEqual(aliases["BMTRPressure"], 5.2)
 
 
 if __name__ == "__main__":

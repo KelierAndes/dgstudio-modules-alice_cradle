@@ -2,10 +2,10 @@
 META = {
     "id": "alice_cradle",
     "name": "Alice in Cradle 联动",
-    "version": "0.8.0",
-    "description": "游戏侧 MOD 上报 HP/MP 等命名数值，本模块把它们与设备读数"
-                   "登记成变量供「事件流」取用，并把设备读数按同名字段回传游戏"
-                   "（HTTP + JSON）；本模块不下发设备动作。",
+    "version": "0.9.0",
+    "description": "游戏侧 MOD 上报 HP/MP 等命名数值，本模块把它们登记成变量、"
+                   "把回传字段登记成核心可写参数，全部交给「事件流」接线；接好的值"
+                   "按同名字段回传给游戏显示（HTTP + JSON）。本模块不下发设备动作。",
     "settings_key": "alice_cradle",
     "actions": [],
     "mods": {"dest": "BepInEx/plugins/AliceInCradleLink",
@@ -35,16 +35,16 @@ META = {
                       "dir": "in", "type": "Bool"},
     },
     "reads": {
-        "StrengthA": {"label": "设备通道 A 强度", "name": "StrengthA",
-                      "dir": "in", "type": "Int"},
-        "StrengthB": {"label": "设备通道 B 强度", "name": "StrengthB",
-                      "dir": "in", "type": "Int"},
-        "Battery": {"label": "设备电量", "name": "Battery", "dir": "in",
-                    "type": "Int"},
-        "Connected": {"label": "连接状态", "name": "Connected", "dir": "in",
-                      "type": "Bool"},
-        "Pressure": {"label": "气压 (kPa)", "name": "Pressure", "dir": "in",
-                     "type": "Float"},
+        "StrengthA": {"label": "设备通道 A 强度", "name": "StrengthA", "dir": "out",
+                      "type": "Int", "desc": "事件流写入，模块按同名 HTTP 字段回传给游戏显示"},
+        "StrengthB": {"label": "设备通道 B 强度", "name": "StrengthB", "dir": "out",
+                      "type": "Int", "desc": "事件流写入，模块按同名 HTTP 字段回传给游戏显示"},
+        "Battery": {"label": "设备电量", "name": "Battery", "dir": "out",
+                    "type": "Int", "desc": "事件流写入，模块按同名 HTTP 字段回传给游戏显示"},
+        "Connected": {"label": "连接状态", "name": "Connected", "dir": "out",
+                      "type": "Bool", "desc": "事件流写入，模块按同名 HTTP 字段回传给游戏显示"},
+        "Pressure": {"label": "气压 (kPa)", "name": "Pressure", "dir": "out",
+                     "type": "Float", "desc": "事件流写入，模块按同名 HTTP 字段回传给游戏显示"},
     },
     "config": {
         "host": {
@@ -56,11 +56,6 @@ META = {
             "min": 1, "max": 65535, "group": "bridge",
             "desc": "Unity MOD 收发的 HTTP 端口",
         },
-        "rate": {
-            "label": "设备读数采样间隔", "type": "float", "default": 0.2,
-            "min": 0.05, "max": 5.0, "step": 0.05, "unit": "s",
-            "group": "bridge", "desc": "设备读数变量多久刷新一次",
-        },
     },
 }
 
@@ -70,8 +65,18 @@ from modules.alice_cradle.server import GameDataServer
 
 _CONFIG_DEFAULTS = spec_defaults(META["config"])
 
-# 映射表时代留下的设置项：换算与设备派发已全部迁到「事件流」画布
-_LEGACY_KEYS = ("mappings", "outputs", "output_map")
+# 映射表时代留下的设置项：换算与设备派发已全部迁到「事件流」画布；
+# rate 随「模块自动采样设备读数」一并取消——回传值现在只由画布写入
+_LEGACY_KEYS = ("mappings", "outputs", "output_map", "rate")
+
+
+def spec_rows(spec: dict, default_dir: str) -> list[dict]:
+    """META 的 params / reads 声明 → 宿主登记行（名字 / 标签 / 方向 / 类型）。"""
+    return [{"name": name, "label": str(item.get("label") or name),
+             "dir": str(item.get("dir") or default_dir),
+             "type": str(item.get("type") or "Float"),
+             "desc": str(item.get("desc") or "")}
+            for name, item in (spec or {}).items()]
 
 
 class AliceCradleModule(ModuleBase):
@@ -90,11 +95,11 @@ class AliceCradleModule(ModuleBase):
 
     def link_params(self) -> list[dict]:
         """游戏上报的通道：模块产出的读数，事件流只读。"""
-        return [{"name": name, "label": str(item.get("label") or name),
-                 "dir": str(item.get("dir") or "in"),
-                 "type": str(item.get("type") or "Float"),
-                 "desc": str(item.get("desc") or "")}
-                for name, item in META["params"].items()]
+        return spec_rows(META["params"], "in")
+
+    def read_params(self) -> list[dict]:
+        """回传给游戏的字段：事件流写入、模块按同名 HTTP 字段回传，宿主可写。"""
+        return spec_rows(META["reads"], "out")
 
     def on_load(self, ctx) -> None:
         self.ctx = ctx
@@ -121,13 +126,6 @@ class AliceCradleModule(ModuleBase):
             self.ctx.log(f"Alice 数据服务启动失败（端口 {cfg['port']} 可能被占用）: {exc!r}")
             raise
 
-    async def reload_config(self) -> None:
-        if self.server is None:
-            return
-        for key in ("rate",):
-            self.server.config[key] = self.ctx.settings.get(
-                key, _CONFIG_DEFAULTS[key])
-
     async def stop(self) -> None:
         if self.server is not None:
             await self.server.stop()
@@ -138,16 +136,16 @@ class AliceCradleModule(ModuleBase):
 
 
 def drop_mapping_tables(settings: dict, log=None) -> bool:
-    """清除映射表时代的设置项：换算与派发都改在事件流里用写入卡片表达。"""
+    """清除已退役的设置项：换算与派发改事件流写入卡，回传值也不再由模块采样。"""
     stale = [key for key in _LEGACY_KEYS if key in settings]
     if not stale:
         return False
     for key in stale:
         settings.pop(key, None)
     if log is not None:
-        log("映射表时代的设置项（" + "、".join(stale) +
-            "）已清除：模块只登记变量，换算与设备动作请在「事件流」里"
-            "用写入卡片驱动")
+        log("遗留设置项（" + "、".join(stale) +
+            "）已清除：模块只登记变量与回传字段，换算、设备动作与回传取值"
+            "都在「事件流」里用写入卡片驱动")
     return True
 
 

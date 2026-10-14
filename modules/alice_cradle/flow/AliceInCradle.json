@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "AliceInCradle",
-  "saved_at": "2026-10-11 01:41:15",
+  "saved_at": "2026-10-14T17:58:10",
   "graphs": {
     "input": {
       "page": "input",
@@ -383,9 +383,257 @@
       ]
     },
     "output": {
-      "page": "output",
-      "nodes": [],
-      "wires": []
+      "nodes": [
+        {
+          "id": "o100",
+          "def": "mod.period",
+          "x": 40.0,
+          "y": 40.0,
+          "params": {
+            "period_ms": 250,
+            "var": ""
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o101",
+          "def": "core.read.COYOTE.StrengthA",
+          "x": 280.0,
+          "y": 40.0,
+          "params": {
+            "key": "COYOTE.StrengthA"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o102",
+          "def": "mod.write.alice_cradle.StrengthA",
+          "x": 620.0,
+          "y": 40.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "StrengthA"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o103",
+          "def": "core.read.COYOTE.StrengthB",
+          "x": 280.0,
+          "y": 117.0,
+          "params": {
+            "key": "COYOTE.StrengthB"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o104",
+          "def": "mod.write.alice_cradle.StrengthB",
+          "x": 620.0,
+          "y": 117.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "StrengthB"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o105",
+          "def": "core.read.COYOTE.Battery",
+          "x": 280.0,
+          "y": 194.0,
+          "params": {
+            "key": "COYOTE.Battery"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o106",
+          "def": "mod.write.alice_cradle.Battery",
+          "x": 620.0,
+          "y": 194.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "Battery"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o107",
+          "def": "core.read.COYOTE.Connected",
+          "x": 280.0,
+          "y": 271.0,
+          "params": {
+            "key": "COYOTE.Connected"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o108",
+          "def": "mod.write.alice_cradle.Connected",
+          "x": 620.0,
+          "y": 271.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "Connected"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o109",
+          "def": "core.read.BMTR.Pressure",
+          "x": 280.0,
+          "y": 348.0,
+          "params": {
+            "key": "BMTR.Pressure"
+          },
+          "alias": "",
+          "overrides": {}
+        },
+        {
+          "id": "o110",
+          "def": "mod.write.alice_cradle.Pressure",
+          "x": 620.0,
+          "y": 348.0,
+          "params": {
+            "module": "alice_cradle",
+            "name": "Pressure"
+          },
+          "alias": "",
+          "overrides": {}
+        }
+      ],
+      "wires": [
+        {
+          "id": "ow110",
+          "src": [
+            "o101",
+            0
+          ],
+          "dst": [
+            "o102",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "ow111",
+          "src": [
+            "o100",
+            0
+          ],
+          "dst": [
+            "o102",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "ow112",
+          "src": [
+            "o103",
+            0
+          ],
+          "dst": [
+            "o104",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "ow113",
+          "src": [
+            "o100",
+            0
+          ],
+          "dst": [
+            "o104",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "ow114",
+          "src": [
+            "o105",
+            0
+          ],
+          "dst": [
+            "o106",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "ow115",
+          "src": [
+            "o100",
+            0
+          ],
+          "dst": [
+            "o106",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "ow116",
+          "src": [
+            "o107",
+            0
+          ],
+          "dst": [
+            "o108",
+            0
+          ],
+          "type": "bool"
+        },
+        {
+          "id": "ow117",
+          "src": [
+            "o100",
+            0
+          ],
+          "dst": [
+            "o108",
+            -1
+          ],
+          "type": "exec"
+        },
+        {
+          "id": "ow118",
+          "src": [
+            "o109",
+            0
+          ],
+          "dst": [
+            "o110",
+            0
+          ],
+          "type": "float"
+        },
+        {
+          "id": "ow119",
+          "src": [
+            "o100",
+            0
+          ],
+          "dst": [
+            "o110",
+            -1
+          ],
+          "type": "exec"
+        }
+      ]
     }
   }
 }
